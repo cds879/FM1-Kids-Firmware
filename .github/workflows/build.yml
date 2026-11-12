@@ -88,10 +88,12 @@ jobs:
       - name: Official FM1 Open build for comparison
         id: official
         continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           info=$(python3 tools/emu/fetch_official.py official.fwsc)
           echo "M-VAVE official: $info"
-          echo "label=M-VAVE's official FM1 Open ${info%% *} from the workbench" >> "$GITHUB_OUTPUT"
+          echo "label=M-VAVE's official FM1 Open $info" >> "$GITHUB_OUTPUT"
 
       - name: Run emulator tests
         run: |

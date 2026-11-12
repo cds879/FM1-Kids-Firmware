@@ -7,12 +7,14 @@ FM-1, and checks that:
 - **boot:** the firmware starts, draws its screen, and makes no stray sound
 - **note:** holding C4 makes sound
 - **seq:** pressing SEQ changes the screen
-- **powercut:** after power is cut during a flash write (operations 1, 10, 50),
-  the next boot still starts and plays
+- **powercut:** after power is cut during a flash write (the first, a middle
+  one, and the last of the writes the firmware makes in the test), the next
+  boot still starts and plays
 
 The emulator is deterministic: the same firmware and key presses always give
 byte-identical screen and audio. CI also runs M-VAVE's official FM1 Open build,
-taken from their workbench page, through the same scenarios and reports
+taken from the newest release of
+[m-vave/fm1_open](https://github.com/m-vave/fm1_open) (or their workbench page), through the same scenarios and reports
 whether the two behave identically. That comparison is informational, because
 the official build can be a newer version than this repository.
 
