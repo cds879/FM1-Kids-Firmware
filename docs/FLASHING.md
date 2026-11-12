@@ -1,7 +1,7 @@
 # Installing FM1 Kids on an FM-1
 
-The normal install runs over the FM-1's own USB cable from a workbench page
-in Chrome or Edge. A recovery dongle is your safety net if an install is
+The normal install runs in Chrome or Edge from the hosted installer,
+**https://cds879.github.io/FM1-Kids-Firmware/**, over a USB-C cable. A recovery dongle is your safety net if an install is
 interrupted. Build and test the dongle **before** the first install, and keep
 a full backup of the FM-1 made with it.
 
@@ -63,18 +63,14 @@ This is M-VAVE's FM1 Open interface, built by this repository's Linux
 toolchain. If it works, the build path is proven on real hardware before the
 kid interface goes on.
 
-1. On GitHub, open **Actions**, then the latest successful run on `main`, and
-   download the `fm1-build-…` artifact. Unzip it.
-2. Serve the folder locally. Web MIDI needs a secure page, and `localhost`
-   counts as one:
-   ```sh
-   cd fm1-build-*/out
-   python3 -m http.server 8000
-   ```
-3. In Chrome or Edge, open
-   `http://localhost:8000/FM1-Open-original-Workbench.html`, connect the FM-1
-   with its USB cable, and go to **Device update**. Install the firmware.
-   Coming from stock V15, the page asks you to confirm.
+1. Open the installer, **https://cds879.github.io/FM1-Kids-Firmware/**, in
+   Chrome or Edge on a computer. It's rebuilt from every change to `main` that
+   passes the emulator tests.
+2. Connect the FM-1 with a USB-C data cable and switch it on.
+3. Press **Original FM1 Open interface (hardware test)**. On the page that
+   opens, choose **Connect device**, then **Device update**, and install. Allow
+   MIDI access when Chrome asks. Coming from stock V15, the page asks you to
+   confirm.
 4. Keep the FM-1 powered and connected until the page says it is done.
 
 **Check:** the FM1 Open screen appears (eight tracks), keys play, SEQ shows
@@ -82,12 +78,18 @@ steps, PLAY plays them, and SAVE then a power cycle keeps the project.
 
 ## 4. Install FM1 Kids
 
-The same steps with `FM1-Kids-Workbench.html` from the same artifact.
+The same steps with **Install FM1 Kids**.
 
 **Check:** FM1 KIDS 0.1 at startup, then picture tiles; keys play; SEQ makes a
 beat that PLAY plays; the battery icon is green (with **+** on USB); a pattern
 left alone for ten seconds is still there after a power cycle; holding GLO
 shows the Bluetooth panel.
+
+**Testing a build that isn't on `main` yet** (a pull request): download the
+`fm1-build-…` artifact from its run under **Actions**, unzip it, run
+`python3 -m http.server 8000` in its `out` folder, and open
+`http://localhost:8000/FM1-Kids-Workbench.html`. Web MIDI needs a secure
+page, and `localhost` counts as one.
 
 ## 5. Ways back
 

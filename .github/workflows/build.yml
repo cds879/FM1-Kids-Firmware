@@ -153,6 +153,61 @@ jobs:
             emu-results/*/*/*.png
             emu-results/*/*/*.wav
 
+  pages:
+    # The browser installer on GitHub Pages: only from main, only after the
+    # emulator tests pass. Needs Settings > Pages > Source: GitHub Actions once;
+    # until then this job reports what to do and the workflow stays green.
+    name: Publish installer (GitHub Pages)
+    needs: [firmware, emulator]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: fm1-build-${{ github.sha }}
+          path: artifact
+
+      - name: Assemble the site
+        run: |
+          mkdir -p site
+          cp artifact/out/FM1-Kids-Workbench.html site/kids.html
+          cp artifact/out/FM1-Open-original-Workbench.html site/original.html
+          cp artifact/out/FM1-Kids.fwsc artifact/out/FM1-Open-original.fwsc site/
+          version=$(sed -n 's/^#define KID_VERSION "\(.*\)"$/\1/p' app/kid/kid_config.h)
+          sed -e "s|@KID_VERSION@|$version|g" -e "s|@REPO@|${{ github.server_url }}/${{ github.repository }}|g" \
+              -e "s|@SHA@|${{ github.sha }}|g" -e "s|@SHORT@|${GITHUB_SHA::7}|g" -e "s|@DATE@|$(date -u +%Y-%m-%d)|g" \
+              tools/pages/index.html > site/index.html
+          grep -q '@[A-Z_]*@' site/index.html && { echo "unfilled placeholder"; exit 1; } || true
+          ls -la site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Publish
+        id: deploy
+        uses: actions/deploy-pages@v4
+
+      - name: If publishing failed
+        if: failure()
+        run: |
+          {
+            echo "### Installer not published"
+            echo
+            echo "Turn on GitHub Pages once: repository **Settings > Pages > Source: GitHub Actions**."
+            echo "On a free account the repository must be public for Pages."
+          } >> "$GITHUB_STEP_SUMMARY"
+
   docker:
     name: Mac path (Docker image)
     runs-on: ubuntu-latest
