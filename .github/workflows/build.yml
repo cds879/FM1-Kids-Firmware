@@ -32,11 +32,15 @@ jobs:
       - name: Browser preview
         run: sh tools/unix/run.sh preview
 
-      - name: Firmware (kid UI)
+      - name: Firmware (kid UI) and its workbench page
+        env:
+          # GPL: the page links the exact source it was built from
+          FM1_SOURCE_URL: https://github.com/${{ github.repository }}/archive/${{ github.sha }}.tar.gz
         run: |
-          sh tools/unix/run.sh firmware
+          sh tools/unix/run.sh package
           mkdir -p build/out
           cp build/dx7/generated/FM1_OFFICIAL_OPEN.fwsc build/out/FM1-Kids.fwsc
+          cp build/official-web/FM1-Official-Open-Source.html build/out/FM1-Kids-Workbench.html
           for f in firmware-report package-report toolchain; do cp build/dx7/$f.json build/out/kids-$f.json; done
           cp build/dx7/sdk.map build/out/kids-sdk.map
 
@@ -49,12 +53,15 @@ jobs:
           print(f"### Flash space (kid UI)\n\nApp image {used:,} of {limit:,} bytes: **{limit - used:,} bytes free**.")
           PY
 
-      - name: Firmware (original FM1 Open UI, for comparison with M-VAVE's build)
+      - name: Firmware (original FM1 Open UI, for comparison and a first hardware test)
+        env:
+          FM1_SOURCE_URL: https://github.com/${{ github.repository }}/archive/${{ github.sha }}.tar.gz
         run: |
           sed -i 's/^#define FM1_KID_UI 1$/#define FM1_KID_UI 0/' app/kid/kid_config.h
           grep -q '^#define FM1_KID_UI 0$' app/kid/kid_config.h
-          sh tools/unix/run.sh firmware
+          sh tools/unix/run.sh package
           cp build/dx7/generated/FM1_OFFICIAL_OPEN.fwsc build/out/FM1-Open-original.fwsc
+          cp build/official-web/FM1-Official-Open-Source.html build/out/FM1-Open-original-Workbench.html
           git checkout app/kid/kid_config.h
 
       - name: Upload build

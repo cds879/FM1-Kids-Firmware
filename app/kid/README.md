@@ -54,3 +54,5 @@ track loops 16 steps, one row of white keys.
   Install other firmware the usual way, with the workbench or M-UPGRADE.
 - Drawing is the band painter adapted from M-VAVE's screen: only parts of
   the screen whose contents changed are sent to the LCD.
+
+To put it on an FM-1, see [docs/FLASHING.md](../../docs/FLASHING.md).
