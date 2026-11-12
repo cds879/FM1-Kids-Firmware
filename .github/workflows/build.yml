@@ -32,8 +32,30 @@ jobs:
       - name: Browser preview
         run: sh tools/unix/run.sh preview
 
-      - name: Firmware
-        run: sh tools/unix/run.sh firmware
+      - name: Firmware (kid UI)
+        run: |
+          sh tools/unix/run.sh firmware
+          mkdir -p build/out
+          cp build/dx7/generated/FM1_OFFICIAL_OPEN.fwsc build/out/FM1-Kids.fwsc
+          for f in firmware-report package-report toolchain; do cp build/dx7/$f.json build/out/kids-$f.json; done
+          cp build/dx7/sdk.map build/out/kids-sdk.map
+
+      - name: Flash space
+        run: |
+          python3 - >> "$GITHUB_STEP_SUMMARY" <<'PY'
+          import json
+          used = json.load(open("build/out/kids-firmware-report.json"))["app_image_bytes"]
+          limit = 453921   # sdk/Package.cs: the largest app image the FM-1 layout accepts
+          print(f"### Flash space (kid UI)\n\nApp image {used:,} of {limit:,} bytes: **{limit - used:,} bytes free**.")
+          PY
+
+      - name: Firmware (original FM1 Open UI, for comparison with M-VAVE's build)
+        run: |
+          sed -i 's/^#define FM1_KID_UI 1$/#define FM1_KID_UI 0/' app/kid/kid_config.h
+          grep -q '^#define FM1_KID_UI 0$' app/kid/kid_config.h
+          sh tools/unix/run.sh firmware
+          cp build/dx7/generated/FM1_OFFICIAL_OPEN.fwsc build/out/FM1-Open-original.fwsc
+          git checkout app/kid/kid_config.h
 
       - name: Upload build
         if: always()
@@ -43,12 +65,7 @@ jobs:
           if-no-files-found: warn
           path: |
             build/preview/index.html
-            build/dx7/generated/*.fwsc
-            build/dx7/firmware-report.json
-            build/dx7/package-report.json
-            build/dx7/build-identity.json
-            build/dx7/toolchain.json
-            build/dx7/sdk.map
+            build/out/
 
   emulator:
     name: Emulator test
@@ -95,17 +112,28 @@ jobs:
           echo "M-VAVE official: $info"
           echo "label=M-VAVE's official FM1 Open $info" >> "$GITHUB_OUTPUT"
 
-      - name: Run emulator tests
+      - name: Emulator test (kid UI)
         run: |
-          fw=$(ls artifact/dx7/generated/*.fwsc | head -1)
+          python3 tools/emu/fm1_emu_test.py --emu ~/fm1-emu-bin/fm1-live \
+            --fwsc artifact/out/FM1-Kids.fwsc --out emu-results/kids
+
+      - name: Emulator test (original UI, compared with M-VAVE's build)
+        if: always()
+        run: |
           ref=""
           [ -f official.fwsc ] && ref="--reference official.fwsc"
-          python3 tools/emu/fm1_emu_test.py --emu ~/fm1-emu-bin/fm1-live --fwsc "$fw" --out emu-results \
+          python3 tools/emu/fm1_emu_test.py --emu ~/fm1-emu-bin/fm1-live \
+            --fwsc artifact/out/FM1-Open-original.fwsc --out emu-results/original \
             $ref --reference-label "${{ steps.official.outputs.label }}"
 
       - name: Summary
         if: always()
-        run: cat emu-results/summary.md >> "$GITHUB_STEP_SUMMARY" || true
+        run: |
+          for part in kids original; do
+            [ -f emu-results/$part/summary.md ] && sed "1s/## FM-1 emulator test/## FM-1 emulator test ($part UI)/" \
+              emu-results/$part/summary.md >> "$GITHUB_STEP_SUMMARY"
+          done
+          true
 
       - name: Upload results
         if: always()
@@ -113,10 +141,10 @@ jobs:
         with:
           name: fm1-emulator-${{ github.sha }}
           path: |
-            emu-results/summary.md
-            emu-results/results.json
-            emu-results/*/*.png
-            emu-results/*/*.wav
+            emu-results/*/summary.md
+            emu-results/*/results.json
+            emu-results/*/*/*.png
+            emu-results/*/*/*.wav
 
   docker:
     name: Mac path (Docker image)
