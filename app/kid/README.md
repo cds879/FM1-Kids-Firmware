@@ -20,6 +20,11 @@ M-VAVE's, unchanged.
 | hold **FX** | Clear this instrument's loop (EDIT brings it back) |
 | **OCT− / OCT+** | Lower / higher |
 
+**For parents, hold GLO** to open the Bluetooth MIDI panel. By default a
+phone, tablet or computer connects to the FM-1. To use a Bluetooth MIDI
+keyboard, hold GLO and press PLAY to search, turn SELECT to choose, and press
+SAVE to connect. REC disconnects; HOME switches back to the default.
+
 The MASTER knob is capped at about three-quarters volume to protect young
 ears (`KID_MASTER_LIMIT` in `kid_config.h`; 1023 removes the cap). Every
 track loops 16 steps, one row of white keys. Choosing a muted instrument

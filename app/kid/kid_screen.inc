@@ -15,6 +15,9 @@
  *   EDIT             undo              SAVE  save the song
  *   hold FX          clear this track (undo brings it back)
  *   OCT- / OCT+      lower / higher
+ *   hold GLO         parent Bluetooth panel: +PLAY search for MIDI keyboards,
+ *                    +SELECT choose, +SAVE connect, +REC disconnect,
+ *                    +HOME let a phone or computer connect instead (default)
  */
 #include "instrument.h"
 #include <string.h>
@@ -74,6 +77,9 @@ static uint16_t notice_color;
 static uint8_t key_note[27], key_track[27];
 static uint32_t shown[E_COUNT], led_keys, led_buttons;
 static struct groove_view view;   /* the current track, refreshed every poll */
+static struct fm1_ble_status ble;
+static unsigned ble_pick, parent;  /* parent: GLO held, the Bluetooth panel is open */
+static int ble_result;
 
 /* ---------- band painter (adapted from screen.c) ---------- */
 enum { PAINT_ROWS = 16, PAINT_BANDS = FM1_SCREEN_HEIGHT / PAINT_ROWS };
@@ -213,8 +219,11 @@ static uint32_t signature(unsigned e)
 {
     uint32_t base = mode | track << 1;
     if (e == E_BODY) return mode;
-    if (e == E_HEAD) return base | playing << 4 | recording << 5 | (uint32_t)view.tempo << 6 | (uint32_t)(octave + 4) << 20;
+    if (e == E_HEAD) return base | playing << 4 | recording << 5 | (uint32_t)view.tempo << 6 | (uint32_t)(octave + 4) << 20 |
+                            (uint32_t)(ble.state >= FM1_BLE_CONNECTED && ble.state <= FM1_BLE_READY) << 24;
     if (e == E_FOOT) {
+        if (parent) return 0x40000000U | ble.state | ble.role << 4 | ble.count << 6 | ble_pick << 10 |
+                           (uint32_t)(ble_result & 7) << 14 | (uint32_t)ble.error << 17;
         if (notice) return 0x80000000U | (uint32_t)(uintptr_t)notice;
         return base | (uint32_t)view.volume << 4 | (uint32_t)view.program << 12 | (uint32_t)(view.tempo & 0xff) << 20;
     }
@@ -242,10 +251,30 @@ static void draw_head(void)
         for (unsigned r = 0; r < 24; ++r) fill(206, 8 + r, r < 12 ? r + 1 : 24 - r, 1, GO);
     } else fill(204, 9, 22, 22, SOFT);                 /* a stop square */
     if (recording) fill(190, 15, 10, 10, STOP);
+    if (ble.state >= FM1_BLE_CONNECTED && ble.state <= FM1_BLE_READY) text(172, 30, "BT", 1, kid_colors[5]);
+}
+/* Parent panel: Bluetooth MIDI. */
+static void draw_parent(void)
+{
+    static const char *const states[] = {"OFF", "READY", "WAITING", "SEARCHING", "CONNECTING", "CHECKING",
+                                         "CONNECTED", "CONNECTED", "LEAVING"};
+    text(4, 194, "BLUETOOTH", 1, kid_colors[5]);
+    text(64, 194, ble.state < 9 ? states[ble.state] : "?", 1, INK);
+    struct fm1_bluetooth_status radio;
+    fm1_bluetooth_get_status(&radio);
+    if (radio.audio_connected) text(190, 194, "AUDIO", 1, GO);
+    text(4, 206, ble.role == FM1_BLE_CENTRAL ? "FM-1 CONNECTS TO A KEYBOARD" : "A PHONE OR COMPUTER CONNECTS", 1, SOFT);
+    struct fm1_ble_device d;
+    if (ble.count && ble_pick < ble.count && !fm1_ble_get_device(ble_pick, &d)) {
+        d.name[24] = 0;
+        text(4, 218, d.name, 1, INK);
+    } else text(4, 218, ble_result ? "TRY AGAIN" : "", 1, STOP);
+    text(4, 230, "PLAY FIND  SAVE JOIN  REC END", 1, OFF4);
 }
 static void draw_foot(void)
 {
     fill(0, 190, 240, 50, BG);
+    if (parent) { draw_parent(); return; }
     if (notice) { text_center(0, 240, 204, notice, 3, notice_color); return; }
     static const char *const labels[4] = {"LOUD", "BRIGHT", "SOUND", "SPEED"};
     for (unsigned k = 0; k < 4; ++k) {
@@ -403,6 +432,24 @@ void groove_screen_control(void)
     for (unsigned t = 0; t < GROOVE_TRACKS; ++t)
         if (groove_sequence_length(t) != KID_STEPS) groove_sequence_length_set(t, KID_STEPS);
 
+    fm1_ble_get_status(&ble);
+    parent = (c.buttons & BUTTON(GLO)) != 0;
+    if (parent) {
+        unsigned count = ble.count < FM1_BLE_MAX_DEVICES ? ble.count : FM1_BLE_MAX_DEVICES;
+        ble_pick = (unsigned)clampi((int)ble_pick + c.encoders[0], 0, count ? (int)count - 1 : 0);
+        if (pressed & BUTTON(PLAY)) {
+            if (ble.role != FM1_BLE_CENTRAL) ble_result = groove_settings_radio(groove_settings_radio_flags() | GROOVE_RADIO_ON, FM1_BLE_CENTRAL);
+            else ble_result = fm1_ble_scan();
+            ble_pick = 0;
+        }
+        if (pressed & BUTTON(SAVE)) ble_result = fm1_ble_connect(ble_pick);
+        if (pressed & BUTTON(REC)) ble_result = fm1_ble_disconnect();
+        if (pressed & BUTTON(HOME)) ble_result = groove_settings_radio(groove_settings_radio_flags() | GROOVE_RADIO_ON, FM1_BLE_PERIPHERAL);
+        previous_buttons = c.buttons;
+        previous_keys = c.keys;
+        paint();
+        return;
+    }
     if (c.encoders[0]) select_track((unsigned)clampi((int)track + c.encoders[0], 0, GROOVE_TRACKS - 1));
     if (c.encoders[2]) groove_control_edit(track, 0, c.encoders[2], 0);
     if (c.encoders[3]) groove_control_edit(track, 0, 0, c.encoders[3]);
