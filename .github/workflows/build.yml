@@ -50,6 +50,72 @@ jobs:
             build/dx7/toolchain.json
             build/dx7/sdk.map
 
+  emulator:
+    name: Emulator test
+    needs: firmware
+    runs-on: ubuntu-latest
+    env:
+      # github.com/joakimeriksson/fm1-emu (MIT), pinned to a tested commit
+      FM1_EMU_REPO: https://github.com/joakimeriksson/fm1-emu
+      FM1_EMU_COMMIT: 3e3fb27df91239fe0e7c5bbf82b14c20ad7dd62a
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache emulator
+        id: emu-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/fm1-emu-bin
+          key: fm1-emu-${{ env.FM1_EMU_COMMIT }}
+
+      - name: Build emulator
+        if: steps.emu-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends libasound2-dev pkg-config
+          git init -q ~/fm1-emu && cd ~/fm1-emu
+          git fetch -q --depth 1 "$FM1_EMU_REPO" "$FM1_EMU_COMMIT" && git checkout -q FETCH_HEAD
+          cargo build --release -p fm1-live
+          mkdir -p ~/fm1-emu-bin && cp target/release/fm1-live ~/fm1-emu-bin/
+
+      - name: Runtime libraries
+        run: sudo apt-get install -y --no-install-recommends libasound2t64 || sudo apt-get install -y --no-install-recommends libasound2
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: fm1-build-${{ github.sha }}
+          path: artifact
+
+      - name: Official FM1 Open build for comparison
+        id: official
+        continue-on-error: true
+        run: |
+          info=$(python3 tools/emu/fetch_official.py official.fwsc)
+          echo "M-VAVE official: $info"
+          echo "label=M-VAVE's official FM1 Open ${info%% *} from the workbench" >> "$GITHUB_OUTPUT"
+
+      - name: Run emulator tests
+        run: |
+          fw=$(ls artifact/dx7/generated/*.fwsc | head -1)
+          ref=""
+          [ -f official.fwsc ] && ref="--reference official.fwsc"
+          python3 tools/emu/fm1_emu_test.py --emu ~/fm1-emu-bin/fm1-live --fwsc "$fw" --out emu-results \
+            $ref --reference-label "${{ steps.official.outputs.label }}"
+
+      - name: Summary
+        if: always()
+        run: cat emu-results/summary.md >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fm1-emulator-${{ github.sha }}
+          path: |
+            emu-results/summary.md
+            emu-results/results.json
+            emu-results/*/*.png
+            emu-results/*/*.wav
+
   docker:
     name: Mac path (Docker image)
     runs-on: ubuntu-latest
