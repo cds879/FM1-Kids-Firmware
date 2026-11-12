@@ -38,7 +38,11 @@ SCENARIOS = [
     ("boot",  4000, "",                         "screen drawn, no stray sound"),
     ("note",  4000, "2000:C4@100,3500:C4^",     "holding C4 makes sound, quickly"),
     ("seq",   3000, "2000:SEQ,2100:SEQ^",       "the screen changes when SEQ is pressed"),
+    # SEQ, then the white keys for steps 1, 5, 9 and 13, then PLAY: the pattern must play by itself
+    ("beat",  5000, "1000:SEQ,1100:SEQ^,1200:F3,1300:F3^,1400:C4,1500:C4^,1600:G4,1700:G4^,1800:D5,1900:D5^,"
+                    "2200:PLAY,2300:PLAY^",     "a pattern made with SEQ plays on its own"),
 ]
+PLAYED_FROM = 2600                 # ms: the beat scenario has released every key by then
 
 
 # ---------- small file helpers (PPM in, PNG / WAV out) ----------
@@ -161,7 +165,7 @@ def check(name, emu, fwsc, out):
     """Run one scenario; returns (checks, artefacts)."""
     _, ms, keys, _ = next(s for s in SCENARIOS if s[0] == name)
     work = out / name
-    r = run(emu, fwsc, ms, keys, work, frames=(name in ("seq", "note")))
+    r = run(emu, fwsc, ms, keys, work, frames=(name in ("seq", "note", "beat")))
     checks = [("emulator ran cleanly", not r["problems"], "; ".join(r["problems"]) or "ok")]
     if r["lcd"]:
         n = colours(r["lcd"])
@@ -181,6 +185,12 @@ def check(name, emu, fwsc, out):
                 latency = first // 2 * 1000 / RATE - NOTE_AT
         checks.append(("key to sound under 150 ms", latency is not None and 0 <= latency < LATENCY_LIMIT,
                        f"{latency:.1f} ms" if latency is not None else "no sound in the boot-aligned recording"))
+    if name == "beat":
+        boot_audio = work / "frames" / "audio.raw"
+        s = samples(boot_audio.read_bytes()) if boot_audio.exists() else ()
+        after = s[PLAYED_FROM * RATE // 1000 * 2:]
+        loud = max((abs(v) for v in after), default=0)
+        checks.append(("pattern plays with no key held", loud >= LOUD_PEAK, f"peak {loud} after {PLAYED_FROM} ms"))
     if name == "seq":
         try:
             changed = frame_lcd(work, 1900)[2] != frame_lcd(work, 2800)[2]

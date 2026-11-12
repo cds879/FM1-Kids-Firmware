@@ -1,4 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-only WITH GPL-3.0-linking-exception */
+#include "kid/kid_config.h"
+#if FM1_KID_UI
+#include "kid/kid_screen.inc"
+#else
 #include "instrument.h"
 #include "fm_patch.h"
 #include "version.h"
@@ -2972,3 +2976,4 @@ static void algorithm_draw(unsigned algorithm, unsigned muted)
         number(x + 8, y + 3, i + 1, 1, 1, muted & (1U << i) ? DIM : BACK, bg);
     }
 }
+#endif /* FM1_KID_UI */

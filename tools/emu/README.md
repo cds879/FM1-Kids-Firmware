@@ -8,12 +8,15 @@ FM-1, and checks that:
 - **note:** holding C4 makes sound within 150 ms of the key press (stock V15
   measures about 75 ms in the emulator; the official-build comparison shows both)
 - **seq:** pressing SEQ changes the screen
+- **beat:** SEQ, the white keys for steps 1, 5, 9 and 13, then PLAY: the
+  pattern plays with no key held (FM1 Open-based firmware; stock V15 differs)
 - **powercut:** after power is cut during a flash write (the first, a middle
   one, and the last of the writes the firmware makes in the test), the next
   boot still starts and plays
 
 The emulator is deterministic: the same firmware and key presses always give
-byte-identical screen and audio. CI also runs M-VAVE's official FM1 Open build,
+byte-identical screen and audio. CI tests the kid UI build, and also builds the original FM1 Open UI from
+the same source to run beside M-VAVE's official FM1 Open build,
 taken from the newest release of
 [m-vave/fm1_open](https://github.com/m-vave/fm1_open) (or their workbench page), through the same scenarios and reports
 whether the two behave identically. That comparison is informational, because
