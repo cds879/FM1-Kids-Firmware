@@ -26,7 +26,7 @@ jobs:
       - name: Toolchain layout (for diagnosis)
         run: |
           cat ~/.fm1-toolchains/jieli/ARCHIVE_SHA256 || true
-          find ~/.fm1-toolchains/jieli -maxdepth 3 -path '*bin*' -type f | sort | head -80
+          ls -la ~/.fm1-toolchains/jieli/pi32v2/bin ~/.fm1-toolchains/jieli/common/bin || true
           find ~/.fm1-toolchains/jieli -name 'LLVMgold*' || true
 
       - name: Browser preview

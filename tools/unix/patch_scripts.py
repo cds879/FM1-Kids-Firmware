@@ -33,11 +33,11 @@ function Find-Tool([string]$label, [string[]]$candidates, [switch]$Optional) {
     throw "JieLi Linux toolchain: cannot find $label (tried $($candidates -join ', ')). Files under bin/: $seen"
 }
 $tools = [ordered]@{
-    clang   = Find-Tool 'clang'   @('pi32v2/bin/clang','pi32/bin/clang','bin/clang')
-    ld      = Find-Tool 'linker'  @('pi32v2/bin/pi32v2-ld','pi32v2/bin/ld','pi32/bin/pi32v2-ld','bin/pi32v2-ld','bin/ld')
-    nm      = Find-Tool 'llvm-nm' @('pi32v2/bin/llvm-nm','pi32/bin/llvm-nm','bin/llvm-nm')
-    objcopy = Find-Tool 'objcopy' @('pi32v2/bin/llvm-objcopy','pi32/bin/llvm-objcopy','bin/llvm-objcopy','common/bin/objcopy')
-    gold    = Find-Tool 'LLVMgold' @('pi32v2/lib/LLVMgold.so','pi32v2/bin/LLVMgold.so','pi32/lib/LLVMgold.so','lib/LLVMgold.so','bin/LLVMgold.so') -Optional
+    clang   = Find-Tool 'clang'   @('pi32v2/bin/clang','common/bin/clang','pi32/bin/clang','bin/clang')
+    ld      = Find-Tool 'linker'  @('pi32v2/bin/pi32v2-ld','pi32v2/bin/ld','common/bin/pi32v2-ld','common/bin/ld','pi32/bin/pi32v2-ld','bin/pi32v2-ld','bin/ld')
+    nm      = Find-Tool 'llvm-nm' @('pi32v2/bin/llvm-nm','common/bin/llvm-nm','common/bin/nm','pi32/bin/llvm-nm','bin/llvm-nm')
+    objcopy = Find-Tool 'objcopy' @('pi32v2/bin/llvm-objcopy','common/bin/llvm-objcopy','common/bin/objcopy','pi32/bin/llvm-objcopy','bin/llvm-objcopy')
+    gold    = Find-Tool 'LLVMgold' @('pi32v2/bin/LLVMgold.so','pi32v2/lib/LLVMgold.so','common/bin/LLVMgold.so','common/lib/LLVMgold.so','lib/LLVMgold.so','bin/LLVMgold.so') -Optional
 }
 if ($env:FM1_NO_LTO -eq '1') { $tools.gold = $null }
 $clangVersion = (& $tools.clang --version 2>&1 | Out-String)

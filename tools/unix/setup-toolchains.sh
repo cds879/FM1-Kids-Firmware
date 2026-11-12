@@ -23,7 +23,7 @@ if [ ! -x "$DEST/wasi-sdk-27.0-x86_64-linux/bin/clang" ]; then
     tar -xzf "$TMP/wasi.tgz" -C "$DEST"
 fi
 
-if [ "${SKIP_JIELI:-0}" != 1 ] && [ ! -e "$DEST/jieli/pi32v2/bin/clang" ]; then
+if [ "${SKIP_JIELI:-0}" != 1 ] && [ ! -d "$DEST/jieli/common/bin" ]; then
     echo "setup: downloading JieLi Linux toolchain from $JIELI_URL"
     curl -fsSL --retry 3 -o "$TMP/jieli.tar.xz" "$JIELI_URL"
     SUM="$(sha256sum "$TMP/jieli.tar.xz" | cut -d' ' -f1)"
@@ -32,10 +32,14 @@ if [ "${SKIP_JIELI:-0}" != 1 ] && [ ! -e "$DEST/jieli/pi32v2/bin/clang" ]; then
         echo "setup: expected $JIELI_TOOLCHAIN_SHA256 - JieLi changed the toolchain." >&2; exit 1
     fi
     mkdir -p "$TMP/jieli" && tar -xJf "$TMP/jieli.tar.xz" -C "$TMP/jieli"
-    TC="$(find "$TMP/jieli" -maxdepth 3 -type f -path '*/pi32v2/bin/clang' | head -1)"
-    [ -n "$TC" ] || { echo "setup: no pi32v2/bin/clang in the JieLi archive:" >&2; find "$TMP/jieli" -maxdepth 4 | head -40 >&2; exit 1; }
-    rm -rf "$DEST/jieli"; mv "$(dirname "$(dirname "$(dirname "$TC")")")" "$DEST/jieli"
+    # The archive holds one jieli-linux-toolchains-<date> folder with pi32v2/ and common/.
+    TC="$(ls -d "$TMP"/jieli/jieli-linux-toolchains-* 2>/dev/null | sort | tail -1)"
+    [ -n "$TC" ] && [ -d "$TC/common/bin" ] || { echo "setup: unexpected JieLi archive layout:" >&2; find "$TMP/jieli" -maxdepth 3 -type d >&2; exit 1; }
+    echo "setup: $(basename "$TC")"
+    rm -rf "$DEST/jieli"; mv "$TC" "$DEST/jieli"
     echo "$SUM" > "$DEST/jieli/ARCHIVE_SHA256"
 fi
-[ -e "$DEST/jieli/pi32v2/bin/clang" ] && "$DEST/jieli/pi32v2/bin/clang" --version | head -1
+for c in "$DEST/jieli/pi32v2/bin/clang" "$DEST/jieli/common/bin/clang"; do
+    [ -x "$c" ] && { "$c" --version | head -1; break; }
+done
 echo "setup: tools ready in $DEST"
