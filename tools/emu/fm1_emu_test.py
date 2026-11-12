@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import struct
 import subprocess
 import sys
@@ -27,7 +28,8 @@ LCD = (370, 42, 480, 480)          # the 240x240 LCD, drawn 2x, inside fm1-live'
 RATE = 44118                       # fm1-live's audio rate (stereo s16le, no header)
 SILENT_PEAK = 64                   # below this the output is silence
 LOUD_PEAK = 500                    # a played note goes well above this
-POWER_CUTS = (1, 10, 50)           # cut the power during these flash erases / programs
+# Power cuts: during the first flash write, one halfway, and the last one the test
+# run makes (counted from a run without a cut, so every cut lands on a real write).
 
 # name, emulated ms, key script (ms:KEY, ^ = release), what to check
 SCENARIOS = [
@@ -148,7 +150,12 @@ def check(name, emu, fwsc, out):
 def power_cuts(emu, fwsc, out):
     """Cut the power during a flash write, then boot from what is left: it must still start and play."""
     checks = []
-    for n in POWER_CUTS:
+    probe = run(emu, fwsc, 4000, "2000:C4,2500:C4^", out / "powercut-probe", flash=out / "powercut-probe" / "flash.bin")
+    m = re.search(r"flash: (\d+) erases / programs", probe["log"])
+    ops = int(m.group(1)) if m else 0
+    if ops == 0:
+        return [("power-cut test possible", False, "the firmware made no flash writes in 4 s")]
+    for n in sorted({1, max(1, ops // 2), ops}):
         work = out / f"powercut-{n}"
         flash = work / "flash.bin"
         work.mkdir(parents=True, exist_ok=True)
@@ -157,9 +164,9 @@ def power_cuts(emu, fwsc, out):
         cut_hit = f"power cut at op {n}" in first["log"]
         again = run(emu, fwsc, 4000, "2000:C4@100,3500:C4^", work / "reboot", flash=flash)
         ok = not again["problems"] and again["lcd"] and colours(again["lcd"]) >= 4 and peak(again["raw"]) >= LOUD_PEAK
-        detail = ("cut during write" if cut_hit else "fewer writes than that: no cut") + \
+        detail = (f"cut during write {n} of {ops}" if cut_hit else f"no cut at write {n} of {ops}") + \
                  (f"; reboot: peak {peak(again['raw'])}" + ("; " + "; ".join(again["problems"]) if again["problems"] else ""))
-        checks.append((f"boots after power cut at flash op {n}", bool(ok), detail))
+        checks.append((f"boots after power cut at flash write {n}", bool(ok and cut_hit), detail))
     return checks
 
 

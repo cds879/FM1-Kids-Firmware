@@ -11,6 +11,7 @@ a message if the page has no package, so CI can carry on without a reference.
 import base64
 import hashlib
 import json
+import re
 import sys
 import urllib.request
 
@@ -25,7 +26,14 @@ def main():
     marker = "const FM1_PACKAGE = "
     at = page.find(marker)
     if at < 0:
-        sys.exit(f"fetch_official: no FM1_PACKAGE in {url} ({len(page)} bytes); the page layout changed")
+        # Show where the page might load firmware from, so the next fix is quick.
+        hints = sorted(set(re.findall(r"""["'`]([^"'`\s]{0,160}(?:\.fwsc|\.json|firmware|package|release)[^"'`\s]{0,80})["'`]""", page, re.I)))
+        print(f"fetch_official: no FM1_PACKAGE in {url} ({len(page)} bytes). Candidate references:", file=sys.stderr)
+        for h in hints[:60]:
+            print("  " + h, file=sys.stderr)
+        for m in re.finditer(r"fetch\(([^)]{0,200})\)", page):
+            print("  fetch(" + m.group(1) + ")", file=sys.stderr)
+        sys.exit(1)
     pkg, _ = json.JSONDecoder().raw_decode(page, at + len(marker))
     if not pkg or "data" not in pkg:
         sys.exit("fetch_official: FM1_PACKAGE holds no firmware")
