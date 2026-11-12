@@ -5,7 +5,8 @@ Every CI run boots the freshly built `.fwsc` in
 FM-1, and checks that:
 
 - **boot:** the firmware starts, draws its screen, and makes no stray sound
-- **note:** holding C4 makes sound
+- **note:** holding C4 makes sound within 150 ms of the key press (stock V15
+  measures about 75 ms in the emulator; the official-build comparison shows both)
 - **seq:** pressing SEQ changes the screen
 - **powercut:** after power is cut during a flash write (the first, a middle
   one, and the last of the writes the firmware makes in the test), the next

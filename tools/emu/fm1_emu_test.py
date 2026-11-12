@@ -28,13 +28,15 @@ LCD = (370, 42, 480, 480)          # the 240x240 LCD, drawn 2x, inside fm1-live'
 RATE = 44118                       # fm1-live's audio rate (stereo s16le, no header)
 SILENT_PEAK = 64                   # below this the output is silence
 LOUD_PEAK = 500                    # a played note goes well above this
+NOTE_AT = 2000                     # ms: when the note scenario presses C4
+LATENCY_LIMIT = 150                # ms; a sanity bound (stock V15 measures ~75 ms in the emulator)
 # Power cuts: during the first flash write, one halfway, and the last one the test
 # run makes (counted from a run without a cut, so every cut lands on a real write).
 
 # name, emulated ms, key script (ms:KEY, ^ = release), what to check
 SCENARIOS = [
     ("boot",  4000, "",                         "screen drawn, no stray sound"),
-    ("note",  4000, "2000:C4@100,3500:C4^",     "holding C4 makes sound"),
+    ("note",  4000, "2000:C4@100,3500:C4^",     "holding C4 makes sound, quickly"),
     ("seq",   3000, "2000:SEQ,2100:SEQ^",       "the screen changes when SEQ is pressed"),
 ]
 
@@ -159,7 +161,7 @@ def check(name, emu, fwsc, out):
     """Run one scenario; returns (checks, artefacts)."""
     _, ms, keys, _ = next(s for s in SCENARIOS if s[0] == name)
     work = out / name
-    r = run(emu, fwsc, ms, keys, work, frames=(name == "seq"))
+    r = run(emu, fwsc, ms, keys, work, frames=(name in ("seq", "note")))
     checks = [("emulator ran cleanly", not r["problems"], "; ".join(r["problems"]) or "ok")]
     if r["lcd"]:
         n = colours(r["lcd"])
@@ -167,8 +169,18 @@ def check(name, emu, fwsc, out):
     pk = peak(r["raw"])
     if name == "boot":
         checks.append(("no stray sound", pk < SILENT_PEAK, f"peak {pk}"))
+    latency = None
     if name == "note":
         checks.append(("note makes sound", pk >= LOUD_PEAK, f"peak {pk}"))
+        # frames/audio.raw starts at power-on, so its first sound dates the key press's effect
+        boot_audio = work / "frames" / "audio.raw"
+        if boot_audio.exists():
+            s = samples(boot_audio.read_bytes())
+            first = next((i for i, v in enumerate(s) if abs(v) > 8), None)
+            if first is not None:
+                latency = first // 2 * 1000 / RATE - NOTE_AT
+        checks.append(("key to sound under 150 ms", latency is not None and 0 <= latency < LATENCY_LIMIT,
+                       f"{latency:.1f} ms" if latency is not None else "no sound in the boot-aligned recording"))
     if name == "seq":
         try:
             changed = frame_lcd(work, 1900)[2] != frame_lcd(work, 2800)[2]
@@ -179,7 +191,7 @@ def check(name, emu, fwsc, out):
         write_png(out / f"{name}.png", r["lcd"])
     write_wav(out / f"{name}.wav", r["raw"])
     digest = {"lcd": hashlib.sha256(r["lcd"][2]).hexdigest()[:16] if r["lcd"] else None,
-              "audio": hashlib.sha256(r["raw"]).hexdigest()[:16], "raw": str(work / "audio.raw")}
+              "audio": hashlib.sha256(r["raw"]).hexdigest()[:16], "raw": str(work / "audio.raw"), "latency": latency}
     return checks, digest
 
 
@@ -244,7 +256,10 @@ def main():
         for s in digests:
             screen = "identical" if digests[s]["lcd"] == ref_digests[s]["lcd"] else "differs"
             ref_ok = all(c[1] for c in ref_results[s])
-            lines.append(f"| {s} | {screen} | {compare_audio(digests[s]['raw'], ref_digests[s]['raw'])} | {'pass' if ref_ok else 'FAIL'} |")
+            audio = compare_audio(digests[s]['raw'], ref_digests[s]['raw'])
+            if digests[s].get("latency") is not None and ref_digests[s].get("latency") is not None:
+                audio += f"; key to sound {digests[s]['latency']:.1f} ms vs {ref_digests[s]['latency']:.1f} ms"
+            lines.append(f"| {s} | {screen} | {audio} | {'pass' if ref_ok else 'FAIL'} |")
         ref_pc = all(c[1] for c in ref_results["powercut"])
         lines.append(f"| powercut | | | {'pass' if ref_pc else 'FAIL'} |")
     lines += ["", "Screenshots (PNG) and audio (WAV) for each scenario are in the run's artifact."]
