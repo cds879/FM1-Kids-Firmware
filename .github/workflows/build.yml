@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: GPL-3.0-only WITH GPL-3.0-linking-exception
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  firmware:
+    name: Firmware + preview (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache toolchains
+        uses: actions/cache@v4
+        with:
+          path: ~/.fm1-toolchains
+          key: fm1-toolchains-${{ hashFiles('tools/unix/setup-toolchains.sh') }}
+
+      - name: Install toolchains
+        run: sh tools/unix/setup-toolchains.sh ~/.fm1-toolchains
+
+      - name: Toolchain layout (for diagnosis)
+        run: |
+          cat ~/.fm1-toolchains/jieli/ARCHIVE_SHA256 || true
+          find ~/.fm1-toolchains/jieli -maxdepth 3 -path '*bin*' -type f | sort | head -80
+          find ~/.fm1-toolchains/jieli -name 'LLVMgold*' || true
+
+      - name: Browser preview
+        run: sh tools/unix/run.sh preview
+
+      - name: Firmware
+        run: sh tools/unix/run.sh firmware
+
+      - name: Upload build
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fm1-build-${{ github.sha }}
+          if-no-files-found: warn
+          path: |
+            build/preview/index.html
+            build/dx7/generated/*.fwsc
+            build/dx7/firmware-report.json
+            build/dx7/package-report.json
+            build/dx7/build-identity.json
+            build/dx7/toolchain.json
+            build/dx7/sdk.map
+
+  docker:
+    name: Mac path (Docker image)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build --platform linux/amd64 -f tools/unix/Dockerfile -t fm1-build .
+      - name: Preview and firmware in the container
+        run: |
+          for mode in preview firmware; do
+            docker run --rm --platform linux/amd64 --user "$(id -u):$(id -g)" -e HOME=/tmp \
+              -v "$PWD:/work" -w /work fm1-build sh tools/unix/run.sh "$mode"
+          done
+          ls -la build/preview build/dx7/generated
