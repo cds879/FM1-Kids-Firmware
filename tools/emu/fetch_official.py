@@ -103,7 +103,7 @@ def main():
         sys.exit(1)
     data, version = found
     open(out, "wb").write(data)
-    print(f"{version} {source} ({len(data)} bytes)")
+    print(f"{version} ({source})")
 
 
 if __name__ == "__main__":

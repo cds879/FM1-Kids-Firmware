@@ -89,6 +89,42 @@ def peak(raw):
 
 
 # ---------- running the emulator ----------
+def samples(raw):
+    n = len(raw) // 2
+    return struct.unpack(f"<{n}h", raw[:n * 2])
+
+
+def envelope(raw, ms=20):
+    """Loudness every `ms` (RMS of both channels), from the first audible sample."""
+    s = samples(raw)
+    start = next((i for i, v in enumerate(s) if abs(v) > 1), len(s)) & ~1
+    s, step = s[start:], RATE * 2 * ms // 1000
+    return [(sum(v * v for v in s[i:i + step]) / step) ** 0.5 for i in range(0, len(s) - step + 1, step)], start // 2
+
+
+def compare_audio(a_path, b_path):
+    a, b = pathlib.Path(a_path).read_bytes(), pathlib.Path(b_path).read_bytes()
+    if a == b:
+        return "identical"
+    ea, sa = envelope(a)
+    eb, sb = envelope(b)
+    loud_a, loud_b = any(v > 1 for v in ea), any(v > 1 for v in eb)
+    if not loud_a and not loud_b:
+        return "both silent"
+    if loud_a != loud_b:
+        return "differs (only one makes sound)"
+    n = min(len(ea), len(eb))
+    ea, eb = ea[:n], eb[:n]
+    ma, mb = sum(ea) / n, sum(eb) / n
+    num = sum((x - ma) * (y - mb) for x, y in zip(ea, eb))
+    den = (sum((x - ma) ** 2 for x in ea) * sum((y - mb) ** 2 for y in eb)) ** 0.5
+    corr = num / den if den else 0.0
+    level = (mb / ma) if ma else 0.0
+    shift = f", starts {abs(sb - sa) / RATE * 1000:.1f} ms {'later' if sb > sa else 'earlier'}" if sb != sa else ""
+    verdict = "same sound" if corr > 0.98 and 0.9 < level < 1.1 else "differs"
+    return f"{verdict} (loudness match {corr:.3f}, level {level:.2f}x{shift})"
+
+
 def run(emu, fwsc, ms, keys, work, flash=None, cut=None, frames=False):
     work.mkdir(parents=True, exist_ok=True)
     env = dict(os.environ, FM1_BENCH_KEYS=keys, FM1_BENCH_WAV=str(work / "audio.raw"),
@@ -143,7 +179,7 @@ def check(name, emu, fwsc, out):
         write_png(out / f"{name}.png", r["lcd"])
     write_wav(out / f"{name}.wav", r["raw"])
     digest = {"lcd": hashlib.sha256(r["lcd"][2]).hexdigest()[:16] if r["lcd"] else None,
-              "audio": hashlib.sha256(r["raw"]).hexdigest()[:16]}
+              "audio": hashlib.sha256(r["raw"]).hexdigest()[:16], "raw": str(work / "audio.raw")}
     return checks, digest
 
 
@@ -202,12 +238,13 @@ def main():
         ref_results, ref_digests = ref
         label = a.reference_label or f"`{pathlib.Path(a.reference).name}`"
         lines += ["", f"### Compared with {label} (informational)", "",
-                  "Same key presses on both. Identical screen and audio means the two images behave the same in these scenarios.", "",
+                  "Same key presses on both. \"Same sound\" means the loudness over time matches once both are lined up at their first sound;",
+                  "a small start shift is expected from a different compiler build (code runs at slightly different speeds).", "",
                   "| Scenario | Screen | Audio | Reference checks |", "|---|---|---|---|"]
         for s in digests:
-            same = lambda k: "identical" if digests[s][k] == ref_digests[s][k] else "differs"
+            screen = "identical" if digests[s]["lcd"] == ref_digests[s]["lcd"] else "differs"
             ref_ok = all(c[1] for c in ref_results[s])
-            lines.append(f"| {s} | {same('lcd')} | {same('audio')} | {'pass' if ref_ok else 'FAIL'} |")
+            lines.append(f"| {s} | {screen} | {compare_audio(digests[s]['raw'], ref_digests[s]['raw'])} | {'pass' if ref_ok else 'FAIL'} |")
         ref_pc = all(c[1] for c in ref_results["powercut"])
         lines.append(f"| powercut | | | {'pass' if ref_pc else 'FAIL'} |")
     lines += ["", "Screenshots (PNG) and audio (WAV) for each scenario are in the run's artifact."]
