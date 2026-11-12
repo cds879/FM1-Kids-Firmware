@@ -2,6 +2,11 @@
 #include "instrument.h"
 #include "fm1_engine_control.h"
 #include <string.h>
+#include "kid/kid_config.h"
+#if FM1_KID_UI
+/* FM1 Kids (app/kid): a keyboard on channel 1 plays the instrument chosen on screen. */
+int groove_kid_route(const uint8_t *m, size_t n, uint8_t out[3]);
+#endif
 #ifdef FM1_HOST_TEST
 #include <stdatomic.h>
 #define WORD _Atomic(unsigned)
@@ -321,6 +326,11 @@ void fm1_app_midi_received(unsigned source, const uint8_t *m, size_t n)
     if (source >= 3 || !m || !n || n > 3) return;
     unsigned clock = m[0] == 0xf8 || m[0] == 0xfa || m[0] == 0xfb || m[0] == 0xfc || m[0] == 0xf2;
     if (clock && !groove_midi_clock_accept(source, m[0])) return;
+#if FM1_KID_UI
+    uint8_t routed[3];
+    if (groove_kid_route(m, n, routed)) { (void)fm1_midi_post(routed, n); }
+    else
+#endif
     (void)fm1_midi_post(m, n);
     if (m[0] == 0xff) enqueue(2, 0, (config.flags | config.thru) & 7U, 0xff, 0, 0);
     if (((config.thru >> 3) & 3U) == source && m[0] != 0xff && (m[0] < 0xf0 || clock)) {

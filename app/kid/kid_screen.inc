@@ -6,19 +6,24 @@
  *
  * Controls
  *   SELECT knob      choose an instrument (track)
+ *   ALGORITHM knob   change the chosen instrument (piano, bass, game, ...)
  *   piano keys       play it; melodic tracks use "happy keys" (pentatonic)
  *   SEQ              BEAT mode: white keys switch steps on/off,
  *                    black keys pick the drum (or note) to place
  *   HOME             back to PLAY mode
  *   PLAY             start / stop      REC   record what you play
  *   K1..K4           LOUD, BRIGHT, SOUND, SPEED
- *   EDIT             undo              SAVE  save the song
- *   hold FX          clear this track (undo brings it back)
+ *   ARP              quiet / unquiet this instrument
+ *   EDIT             undo              SAVE  save now (it also saves by itself)
+ *   FX, then FX      start this instrument over (EDIT brings it back)
  *   OCT- / OCT+      lower / higher
  *   hold GLO         parent Bluetooth panel: +PLAY search for MIDI keyboards,
  *                    +SELECT choose, +SAVE connect, +REC disconnect,
  *                    +HOME let a phone or computer connect instead (default)
+ * A keyboard on MIDI channel 1 (USB, Bluetooth or DIN) plays the chosen
+ * instrument; channels 2-16 keep their usual tracks.
  */
+#include "fm1_device.h"
 #include "instrument.h"
 #include <string.h>
 
@@ -71,7 +76,8 @@ static const uint8_t punctuation[][6] = {{'!', 0, 0, 0x5f, 0, 0}, {'-', 8, 8, 8,
 static unsigned track, mode, drum, recording, playing, play_step, retry_reset;
 static unsigned beat_note = 60;
 static int octave;
-static uint32_t previous_buttons, previous_keys, fx_down_at, notice_until;
+static uint32_t previous_buttons, previous_keys, notice_until, confirm_until;
+static uint32_t booted_at, input_at, save_tried_at, warned_at, picked_at;
 static const char *notice;
 static uint16_t notice_color;
 static uint8_t key_note[27], key_track[27];
@@ -80,6 +86,10 @@ static struct groove_view view;   /* the current track, refreshed every poll */
 static struct fm1_ble_status ble;
 static unsigned ble_pick, parent;  /* parent: GLO held, the Bluetooth panel is open */
 static int ble_result;
+static unsigned battery_avg, battery_level, on_usb, blink;   /* level 0..3 */
+static unsigned pick_kind, picking;   /* ALGORITHM: the instrument being chosen */
+static volatile unsigned keyboard_channel;   /* read by the MIDI task */
+static uint8_t keyboard_held[128];            /* MIDI task only: channel+1 per held note */
 
 /* ---------- band painter (adapted from screen.c) ---------- */
 enum { PAINT_ROWS = 16, PAINT_BANDS = FM1_SCREEN_HEIGHT / PAINT_ROWS };
@@ -171,6 +181,7 @@ static void say(const char *s, uint16_t color, uint32_t now)
 }
 static unsigned drum_track(unsigned t) { return groove_pad_count(t) != 0; }
 static unsigned kind(unsigned t) { unsigned k = groove_source_type(t); return k < GROOVE_SOURCES ? k : 0; }
+static unsigned shown_kind(unsigned t) { return picking && t == track ? pick_kind : kind(t); }
 static void release_keys(void)
 {
     for (unsigned key = 0; key < 27; ++key)
@@ -198,6 +209,104 @@ static unsigned key_pitch(unsigned key)
     if (note >= 128 || drum_track(track)) return note;
     return note - note % 12U + happy[note % 12U];
 }
+/* BRIGHT: the setting that brightens each engine most; DX7 uses feedback. */
+struct bright { unsigned fm, part, param, max; };
+static int bright_target(unsigned t, struct bright *b)
+{
+    b->fm = kind(t) == GROOVE_DX7;
+    b->part = drum_track(t) ? drum : 0;
+    if (b->fm) { b->param = 135; b->max = 7; return 1; }
+    static const char *const names[] = {"Cutoff", "BRIGHT", "Tone", "Vel LPF", "NOISE", "Drive"};
+    unsigned n = groove_tone_count(t, b->part);
+    for (unsigned w = 0; w < sizeof names / sizeof names[0]; ++w)
+        for (unsigned i = 0; i < n; ++i) {
+            const fm1_param_t *p = groove_tone_parameter(t, b->part, i);
+            if (p && p->max && !strcmp(p->name, names[w])) { b->param = i; b->max = p->max; return 1; }
+        }
+    return 0;
+}
+static int bright_value(unsigned t)   /* 0..100, or -1 when the engine has none */
+{
+    struct bright b;
+    if (!bright_target(t, &b)) return -1;
+    if (b.fm) {
+        uint8_t patch[156];
+        return groove_fm_copy(t, patch, NULL) ? -1 : (int)(patch[135] & 7U) * 100 / 7;
+    }
+    uint8_t v[GROOVE_TONE_PARAMS];
+    return groove_tone_copy(t, b.part, v) <= (int)b.param ? -1 : (int)v[b.param] * 100 / (int)b.max;  /* returns the count */
+}
+static void bright_edit(int delta)
+{
+    struct bright b;
+    if (!bright_target(track, &b)) return;
+    if (b.fm) groove_fm_edit(track, b.param, delta);
+    else groove_tone_edit(track, b.part, b.param, delta);
+}
+static void sound_name(unsigned t, char out[12])
+{
+    static const char *const chips[4] = {"YM", "AY", "NOISE", "MIX"};
+    struct groove_view v;
+    groove_get_view(t, 0, &v);
+    unsigned k = kind(t);
+    out[0] = 0;
+    if (k == GROOVE_DX7) {
+        uint8_t patch[156];
+        if (!groove_fm_copy(t, patch, NULL)) {
+            memcpy(out, patch + 145, 10);
+            out[10] = 0;
+            for (int i = 9; i >= 0 && out[i] == ' '; --i) out[i] = 0;
+        }
+    } else if (k == GROOVE_303) strcpy(out, v.program ? "SQUARE" : "SAW");
+    else if (k == GROOVE_PSG) strcpy(out, chips[v.program & 3U]);
+    if (!out[0]) number(out, v.program + 1U);
+}
+/* Battery: the stock firmware's levels (raw ADC under 531, 531.., 561.., 591..). */
+static void battery_poll(unsigned raw, uint32_t now)
+{
+    static const uint16_t step[3] = {531, 561, 591};
+    on_usb = fm1_device_usb_connected() > 0;
+    battery_avg = battery_avg ? (battery_avg * 7U + raw) / 8U : raw;
+    unsigned level = battery_level;
+    while (level < 3 && battery_avg >= step[level] + 4U) ++level;
+    while (level > 0 && battery_avg + 4U < step[level - 1]) --level;
+    battery_level = level;
+    blink = !on_usb && !level ? (now / 500U) & 1U : 0;
+    if (!on_usb && !level && (!warned_at || now - warned_at >= 60000U)) {
+        warned_at = now | 1U;
+        say("CHARGE ME!", STOP, now);
+    }
+}
+/* Save by itself once a change has rested: stopped, untouched for 8 s (or the
+ * battery is nearly empty). Saving briefly silences audio, so never while playing. */
+static void autosave(uint32_t now)
+{
+    if (!groove_project_dirty() || playing || recording || now - booted_at < 5000U) return;
+    if (now - input_at < 8000U && !(battery_level == 0 && !on_usb)) return;
+    if (save_tried_at && now - save_tried_at < 30000U) return;
+    save_tried_at = now | 1U;
+    if (!groove_project_save_slot(groove_project_slot())) say("SAVED", GO, now);
+}
+/* MIDI task: a keyboard on channel 1 plays the chosen instrument. Each note
+ * ends on the track it started on, even if the choice changes meanwhile. */
+int groove_kid_route(const uint8_t *m, size_t n, uint8_t out[3])
+{
+    unsigned status = m[0] & 0xf0U;
+    if (n < 2 || m[0] < 0x80U || status == 0xf0U || (m[0] & 15U)) return 0;
+    unsigned ch = keyboard_channel & 15U, note = m[1] & 127U;
+    if (status == 0x80U || status == 0x90U || status == 0xa0U) {
+        if (status == 0x90U && n > 2 && m[2]) keyboard_held[note] = (uint8_t)(ch + 1U);
+        else if (keyboard_held[note]) {
+            ch = keyboard_held[note] - 1U;
+            if (status != 0xa0U) keyboard_held[note] = 0;
+        }
+    }
+    if (!ch) return 0;
+    out[0] = (uint8_t)(status | ch);
+    out[1] = m[1];
+    out[2] = n > 2 ? m[2] : 0;
+    return 1;
+}
 
 /* ---------- screen elements ---------- */
 /* Each element has a rectangle and a signature of everything it shows. Only
@@ -215,17 +324,22 @@ static int rect(unsigned e, unsigned *x, unsigned *y, unsigned *w, unsigned *h)
     if (i == 16) { *x = 0; *y = 42; *w = 240; *h = 40; return 1; }   /* what the black keys picked */
     *x = 4 + (i % 8U) * 29U; *y = 88 + (i / 8U) * 50U; *w = 27; *h = 44; return 1;
 }
+static uint32_t mix(uint32_t s, uint32_t v) { return s * 131U + v; }
 static uint32_t signature(unsigned e)
 {
     uint32_t base = mode | track << 1;
     if (e == E_BODY) return mode;
-    if (e == E_HEAD) return base | playing << 4 | recording << 5 | (uint32_t)view.tempo << 6 | (uint32_t)(octave + 4) << 20 |
-                            (uint32_t)(ble.state >= FM1_BLE_CONNECTED && ble.state <= FM1_BLE_READY) << 24;
+    if (e == E_HEAD)
+        return mix(mix(mix(mix(base | playing << 4 | recording << 5 | (uint32_t)(octave + 4) << 6, view.tempo),
+                           (ble.state >= FM1_BLE_CONNECTED && ble.state <= FM1_BLE_READY)),
+                       battery_level | on_usb << 2 | blink << 3), 7);
     if (e == E_FOOT) {
         if (parent) return 0x40000000U | ble.state | ble.role << 4 | ble.count << 6 | ble_pick << 10 |
                            (uint32_t)(ble_result & 7) << 14 | (uint32_t)ble.error << 17;
-        if (notice) return 0x80000000U | (uint32_t)(uintptr_t)notice;
-        return base | (uint32_t)view.volume << 4 | (uint32_t)view.program << 12 | (uint32_t)(view.tempo & 0xff) << 20;
+        if (confirm_until) return 0x20000000U | track;
+        if (notice) return 0x80000000U | ((uint32_t)(uintptr_t)notice & 0x3fffffffU);
+        uint32_t s = mix(mix(mix(base, view.volume), view.program), view.tempo);
+        return mix(mix(s, (uint32_t)(bright_value(track) + 1)), kind(track)) & 0x1fffffffU;
     }
     unsigned i = e - E_ITEMS;
     if (mode == KID_PLAY) {
@@ -234,15 +348,30 @@ static uint32_t signature(unsigned e)
         groove_get_view(i, 0, &v);
         unsigned sounding = 0;
         for (unsigned k = 0; k < 27; ++k) sounding |= key_note[k] != 0xff && key_track[k] == i;
-        return (i == track) | kind(i) << 1 | (uint32_t)v.muted << 4 | sounding << 5 | 1U << 6;
+        return (i == track) | shown_kind(i) << 1 | (uint32_t)v.muted << 4 | sounding << 5 | 1U << 6 |
+               (uint32_t)(picking && i == track) << 7;
     }
     if (i == 16) return base | drum << 4 | beat_note << 8 | kind(track) << 16;
-    return base | step_on(track, i) << 4 | (playing && play_step == i) << 5 | drum << 6 | 1U << 12;
+    struct groove_view v;
+    groove_get_view(track, i, &v);
+    uint32_t s = mix(mix(mix(base, v.step.drums), v.step.velocity ? v.step.note + 1U : 0), drum);
+    return mix(s, playing && play_step == i) | 1U;
+}
+static void draw_battery(void)
+{
+    uint16_t c = on_usb ? GO : battery_level >= 2 ? GO : battery_level ? kid_colors[2] : STOP;
+    if (blink) return;                                    /* nearly empty: it flashes */
+    frame(88, 14, 20, 12, 2, c);
+    fill(108, 17, 2, 6, c);
+    unsigned bars = on_usb ? 3 : battery_level;
+    for (unsigned b = 0; b < bars; ++b) fill(91 + b * 5U, 17, 4, 6, c);
+    if (on_usb) text(95, 30, "+", 1, GO);
 }
 static void draw_head(void)
 {
     fill(0, 0, 240, 40, BG);
     text(8, 9, recording ? "REC" : mode == KID_BEAT ? "BEAT" : "PLAY", 3, recording ? STOP : INK);
+    draw_battery();
     /* Speed: one to five dots */
     unsigned dots = (unsigned)clampi(((int)view.tempo - 50) / 30 + 1, 1, 5);
     for (unsigned d = 0; d < 5; ++d) fill(120 + d * 13U, 16, 9, 9, d < dots ? kid_colors[1] : OFF);
@@ -268,29 +397,38 @@ static void draw_parent(void)
     if (ble.count && ble_pick < ble.count && !fm1_ble_get_device(ble_pick, &d)) {
         d.name[24] = 0;
         text(4, 218, d.name, 1, INK);
-    } else text(4, 218, ble_result ? "TRY AGAIN" : "", 1, STOP);
+    } else text(4, 218, ble_result ? "TRY AGAIN" : "FM1 KIDS " KID_VERSION, 1, ble_result ? STOP : OFF4);
     text(4, 230, "PLAY FIND  SAVE JOIN  REC END", 1, OFF4);
 }
 static void draw_foot(void)
 {
     fill(0, 190, 240, 50, BG);
     if (parent) { draw_parent(); return; }
+    if (confirm_until) {
+        text_center(0, 240, 196, "START OVER?", 3, STOP);
+        text_center(0, 240, 224, "FX = YES   EDIT = UNDO LATER", 1, SOFT);
+        return;
+    }
     if (notice) { text_center(0, 240, 204, notice, 3, notice_color); return; }
     static const char *const labels[4] = {"LOUD", "BRIGHT", "SOUND", "SPEED"};
     for (unsigned k = 0; k < 4; ++k) {
         unsigned x = k * 60U;
         fill(x + 4, 192, 52, 3, kid_colors[(k * 2U + 1U) % 8U]);
         text_center(x, 60, 200, labels[k], 1, SOFT);
-        char value[8] = "";
-        if (k == 0) {
+        int bar = k == 0 ? (int)view.volume * 100 / 127 : k == 1 ? bright_value(track) : -2;
+        if (bar >= 0) {
             fill(x + 8, 216, 44, 10, OFF);
-            fill(x + 8, 216, view.volume * 44U / 127U, 10, kid_colors[1]);
-        } else if (k == 2) {
-            number(value, view.program + 1U);
+            fill(x + 8, 216, (unsigned)bar * 44U / 100U, 10, kid_colors[k ? 3 : 1]);
+        } else if (bar == -1) text_center(x, 60, 214, "-", 2, OFF4);
+        char value[12];
+        if (k == 2) {
+            sound_name(track, value);
+            unsigned big = strlen(value) <= 4;
+            text_center(x, 60, big ? 214 : 218, value, big ? 2 : 1, INK);
         } else if (k == 3) {
             number(value, view.tempo);
-        } else text_center(x, 60, 214, "<>", 2, OFF4);
-        if (value[0]) text_center(x, 60, 214, value, 2, INK);
+            text_center(x, 60, 214, value, 2, INK);
+        }
     }
 }
 static void draw_tile(unsigned i, unsigned x, unsigned y, unsigned w, unsigned h)
@@ -299,10 +437,11 @@ static void draw_tile(unsigned i, unsigned x, unsigned y, unsigned w, unsigned h
     groove_get_view(i, 0, &v);
     uint16_t c = kid_colors[i];
     unsigned selected = i == track;
-    fill(x, y, w, h, selected ? c : v.muted ? OFF : dim(c));
-    if (selected) frame(x, y, w, h, 3, INK);
-    picture(x + 4, y + 6, kind(i), 0, selected ? INK : v.muted ? OFF4 : SOFT);
-    text_center(x, w, y + h - 16, kind_name[kind(i)], 1, selected ? BG : INK);
+    fill(x, y, w, h, v.muted ? OFF : selected ? c : dim(c));
+    if (selected) frame(x, y, w, h, 3, picking ? kid_colors[2] : INK);
+    picture(x + 4, y + 6, shown_kind(i), 0, v.muted ? OFF4 : selected ? INK : SOFT);
+    text_center(x, w, y + h - 16, v.muted ? "QUIET" : kind_name[shown_kind(i)], 1,
+                v.muted ? SOFT : selected ? BG : INK);
     for (unsigned k = 0; k < 27; ++k)
         if (key_note[k] != 0xff && key_track[k] == i) { fill(x + w - 12, y + 6, 7, 7, INK); break; }
 }
@@ -321,10 +460,27 @@ static void draw_pick(void)
     text(44, 50, name, 3, c);
     text(44, 73, "BLACK KEYS: PICK  WHITE: STEPS", 1, OFF4);
 }
+/* Melody notes take the colour of their pitch and sit higher when higher. */
+static const uint16_t note_colors[12] = {RGB(255, 80, 80), RGB(255, 80, 80), RGB(255, 160, 40), RGB(255, 160, 40),
+                                         RGB(250, 220, 40), RGB(250, 220, 40), RGB(80, 210, 90), RGB(80, 210, 90),
+                                         RGB(40, 200, 220), RGB(70, 120, 255), RGB(70, 120, 255), RGB(170, 90, 240)};
 static void draw_cell(unsigned i, unsigned x, unsigned y, unsigned w, unsigned h)
 {
-    unsigned on = step_on(track, i);
-    fill(x, y, w, h, on ? kid_colors[track] : i % 4U ? OFF : OFF4);
+    struct groove_view v;
+    groove_get_view(track, i, &v);
+    uint16_t off = i % 4U ? OFF : OFF4;
+    if (drum_track(track)) {
+        unsigned on = (v.step.drums >> drum) & 1U;
+        fill(x, y, w, h, on ? kid_colors[track] : off);
+        unsigned n = groove_pad_count(track) < 12U ? groove_pad_count(track) : 12U;
+        for (unsigned d = 0; d < n; ++d)                 /* the rest of the kit: a dot per drum */
+            if (d != drum && ((v.step.drums >> d) & 1U))
+                fill(x + 3 + (d % 3U) * 8U, y + 4 + (d / 3U) * 10U, 5, 5, on ? BG : SOFT);
+    } else if (v.step.velocity) {
+        fill(x, y, w, h, note_colors[v.step.note % 12U]);
+        unsigned lift = (unsigned)clampi((int)v.step.note - 48, 0, 36);   /* C3..C6 */
+        fill(x + 3, y + h - 8 - lift * (h - 12) / 36U, w - 6, 4, INK);
+    } else fill(x, y, w, h, off);
     if (playing && play_step == i) frame(x, y, w, h, 3, INK);
 }
 static void draw_element(unsigned e)
@@ -379,6 +535,8 @@ static void leds(void)
     buttons |= playing ? BUTTON(PLAY) : 0;
     buttons |= recording ? BUTTON(REC) : 0;
     buttons |= mode == KID_BEAT ? BUTTON(SEQ) : BUTTON(HOME);
+    buttons |= view.muted ? BUTTON(ARP) : 0;
+    buttons |= confirm_until ? BUTTON(FX) : 0;
     for (unsigned k = 0; k < 27; ++k)
         if (((keys ^ led_keys) >> k) & 1U) fm1_led_set(14 + k, (keys >> k) & 1U);
     for (unsigned b = 0; b < 14; ++b)
@@ -390,8 +548,11 @@ static void leds(void)
 void groove_screen_init(void)
 {
     track = mode = drum = recording = playing = play_step = retry_reset = 0;
-    octave = 0; beat_note = 60; notice = NULL;
-    previous_buttons = previous_keys = fx_down_at = 0;
+    octave = 0; beat_note = 60;
+    previous_buttons = previous_keys = confirm_until = 0;
+    input_at = save_tried_at = warned_at = picked_at = 0;
+    picking = pick_kind = 0;
+    battery_avg = 0; battery_level = 3; on_usb = blink = 0;
     memset(key_note, 0xff, sizeof key_note);
     memset(shown, 0xff, sizeof shown);
     memset(paint_left, 0, sizeof paint_left);
@@ -401,6 +562,9 @@ void groove_screen_init(void)
     fm1_controls_init();
     for (unsigned key = 0; key < 41; ++key) fm1_led_set(key, 0);
     fm1_screen_init();
+    booted_at = fm1_millis();
+    say("FM1 KIDS " KID_VERSION, kid_colors[4], booted_at);
+    notice_until = booted_at + 2000U;
     groove_get_view(track, 0, &view);
     paint();
 }
@@ -408,10 +572,7 @@ static void select_track(unsigned t)
 {
     if (t == track) return;
     release_keys();
-    track = t; drum = 0;
-    struct groove_view v;
-    groove_get_view(track, 0, &v);
-    if (v.muted) groove_mix_toggle(track, 0);          /* kids never wonder why it is silent */
+    track = t; drum = 0; picking = 0;
     if (recording) groove_edit_record(1, track, 0);
 }
 void groove_screen_control(void)
@@ -422,12 +583,16 @@ void groove_screen_control(void)
     groove_master_update(c.knob < KID_MASTER_LIMIT ? c.knob : KID_MASTER_LIMIT);
     uint32_t pressed = c.buttons & ~previous_buttons;
     uint32_t key_down = c.keys & ~previous_keys;
+    unsigned turned = 0;
+    for (unsigned e = 0; e < 7; ++e) turned |= c.encoders[e] != 0;
+    if (pressed || key_down || turned) input_at = now;
     if (notice && (int32_t)(now - notice_until) >= 0) notice = NULL;
     if (retry_reset) {
         if (!post(0xff, 0, 0, 1)) return;
         retry_reset = 0;
         memset(key_note, 0xff, sizeof key_note);
     }
+    battery_poll(c.battery, now);
     /* Every track loops one row of keys. */
     for (unsigned t = 0; t < GROOVE_TRACKS; ++t)
         if (groove_sequence_length(t) != KID_STEPS) groove_sequence_length_set(t, KID_STEPS);
@@ -438,13 +603,15 @@ void groove_screen_control(void)
         unsigned count = ble.count < FM1_BLE_MAX_DEVICES ? ble.count : FM1_BLE_MAX_DEVICES;
         ble_pick = (unsigned)clampi((int)ble_pick + c.encoders[0], 0, count ? (int)count - 1 : 0);
         if (pressed & BUTTON(PLAY)) {
-            if (ble.role != FM1_BLE_CENTRAL) ble_result = groove_settings_radio(groove_settings_radio_flags() | GROOVE_RADIO_ON, FM1_BLE_CENTRAL);
+            if (ble.role != FM1_BLE_CENTRAL)
+                ble_result = groove_settings_radio(groove_settings_radio_flags() | GROOVE_RADIO_ON, FM1_BLE_CENTRAL);
             else ble_result = fm1_ble_scan();
             ble_pick = 0;
         }
         if (pressed & BUTTON(SAVE)) ble_result = fm1_ble_connect(ble_pick);
         if (pressed & BUTTON(REC)) ble_result = fm1_ble_disconnect();
-        if (pressed & BUTTON(HOME)) ble_result = groove_settings_radio(groove_settings_radio_flags() | GROOVE_RADIO_ON, FM1_BLE_PERIPHERAL);
+        if (pressed & BUTTON(HOME))
+            ble_result = groove_settings_radio(groove_settings_radio_flags() | GROOVE_RADIO_ON, FM1_BLE_PERIPHERAL);
         previous_buttons = c.buttons;
         previous_keys = c.keys;
         paint();
@@ -452,17 +619,47 @@ void groove_screen_control(void)
     }
     if (c.encoders[0]) select_track((unsigned)clampi((int)track + c.encoders[0], 0, GROOVE_TRACKS - 1));
     if (c.encoders[2]) groove_control_edit(track, 0, c.encoders[2], 0);
-    if (c.encoders[3]) groove_control_edit(track, 0, 0, c.encoders[3]);
+    if (c.encoders[3]) bright_edit(c.encoders[3]);
     if (c.encoders[4]) groove_control_edit(track, c.encoders[4], 0, 0);
     if (c.encoders[5]) groove_tempo_edit(c.encoders[5]);
-    if ((c.encoders[1] || c.encoders[6]) && drum_track(track))
+    if (mode == KID_BEAT && (c.encoders[1] || c.encoders[6]) && drum_track(track))
         drum = (unsigned)clampi((int)drum + c.encoders[1] + c.encoders[6], 0, (int)groove_pad_count(track) - 1);
+    /* ALGORITHM in PLAY: turn to choose a new instrument; it changes once the knob rests. */
+    if (mode == KID_PLAY && c.encoders[1]) {
+        if (!picking) pick_kind = kind(track);
+        pick_kind = (unsigned)(((int)pick_kind + c.encoders[1] % (int)GROOVE_SOURCES + (int)GROOVE_SOURCES) % (int)GROOVE_SOURCES);
+        picking = 1; picked_at = now;
+        say(kind_name[pick_kind], kid_colors[track], now);
+    }
+    if (picking && now - picked_at >= 700U) {
+        picking = 0;
+        if (pick_kind != kind(track)) {
+            release_keys();
+            if (groove_source_set(track, pick_kind)) say("OOPS", STOP, now);
+            drum = 0;
+        }
+    }
 
     groove_get_view(track, 0, &view);
     playing = view.playing;
     play_step = view.play_step;
     recording = groove_edit_recording();
+    keyboard_channel = groove_midi_input_channel(track);
     unsigned old_mode = mode;
+    /* Start over: FX asks, FX again clears; anything else says no. */
+    if (confirm_until) {
+        if (pressed & BUTTON(FX)) {
+            confirm_until = 0;
+            say(groove_edit_clear(track, 0, 2) ? "OOPS" : "CLEARED", kid_colors[0], now);
+            pressed &= ~BUTTON(FX);
+        } else if (pressed || key_down || turned || (int32_t)(now - confirm_until) >= 0) {
+            confirm_until = 0;
+            pressed = 0; key_down = 0;
+        }
+    } else if (pressed & BUTTON(FX)) {
+        confirm_until = (now + 4000U) | 1U;
+        pressed &= ~BUTTON(FX);
+    }
     if (pressed & BUTTON(HOME)) mode = KID_PLAY;
     if (pressed & BUTTON(SEQ)) mode = mode == KID_BEAT ? KID_PLAY : KID_BEAT;
     if (pressed & (BUTTON(OCT_DOWN) | BUTTON(OCT_UP))) {
@@ -482,12 +679,11 @@ void groove_screen_control(void)
         say(failed ? "OOPS" : "SAVED!", failed ? STOP : GO, now);
     }
     if (pressed & BUTTON(EDIT)) say(groove_edit_undo() ? "NO UNDO" : "UNDO!", kid_colors[4], now);
-    if (pressed & BUTTON(FX)) fx_down_at = now | 1U;
-    if (!(c.buttons & BUTTON(FX))) fx_down_at = 0;
-    else if (fx_down_at && now - fx_down_at >= 1500U) {
-        fx_down_at = 0;
-        say(groove_edit_clear(track, 0, 2) ? "OOPS" : "CLEARED", kid_colors[0], now);
-    } else if (fx_down_at && !notice) say("HOLD...", SOFT, now);
+    if (pressed & BUTTON(ARP)) {
+        groove_mix_toggle(track, 0);
+        groove_get_view(track, 0, &view);
+        say(view.muted ? "QUIET" : "ON", view.muted ? SOFT : GO, now);
+    }
     if (mode != old_mode) release_keys();
 
     /* BEAT: white keys toggle steps; black keys pick what to place, and sound it. */
@@ -523,6 +719,7 @@ void groove_screen_control(void)
             if (!drum_track(track)) beat_note = note;
         }
     }
+    autosave(now);
     previous_buttons = c.buttons;
     previous_keys = c.keys;
     leds();
@@ -542,6 +739,7 @@ void groove_screen_mmc(unsigned command)
 
 #ifdef FM1_HOST_TEST
 /* Browser preview hooks: the workbench page runs this same interface. */
+int fm1_device_usb_connected(void) { return 0; }
 static char web_knobs[4][2][16];
 static struct { int32_t x, y, w, h, action, index, owner, raw; char label[16], value[16]; } web_targets[1];
 void groove_screen_web_fine(unsigned fine) { (void)fine; }
