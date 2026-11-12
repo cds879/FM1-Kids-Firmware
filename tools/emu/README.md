@@ -10,6 +10,17 @@ FM-1, and checks that:
 - **seq:** pressing SEQ changes the screen
 - **beat:** SEQ, the white keys for steps 1, 5, 9 and 13, then PLAY: the
   pattern plays with no key held (FM1 Open-based firmware; stock V15 differs)
+The kid build also runs `--suite kids`:
+
+- **startover:** FX, then FX again, silences the loop; EDIT (undo) brings it back
+- **quiet:** ARP quiets the chosen instrument and brings it back
+- **picker:** turning ALGORITHM changes the tile, and the new instrument plays
+- **autosave:** a pattern left alone for a few seconds is still there after a
+  power cycle, without pressing SAVE
+- **battery:** a low battery reading turns the battery icon red
+
+Every build is also checked for:
+
 - **powercut:** after power is cut during a flash write (the first, a middle
   one, and the last of the writes the firmware makes in the test), the next
   boot still starts and plays

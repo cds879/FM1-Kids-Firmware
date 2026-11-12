@@ -115,7 +115,7 @@ jobs:
       - name: Emulator test (kid UI)
         run: |
           python3 tools/emu/fm1_emu_test.py --emu ~/fm1-emu-bin/fm1-live \
-            --fwsc artifact/out/FM1-Kids.fwsc --out emu-results/kids
+            --fwsc artifact/out/FM1-Kids.fwsc --out emu-results/kids --suite kids
 
       - name: Emulator test (original UI, compared with M-VAVE's build)
         if: always()
