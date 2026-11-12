@@ -27,7 +27,7 @@ IMAGE="fm1-build:$(echo "$STAMP" | cut -c1-12)"
 if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
     echo "build.sh: building $IMAGE (first run downloads ~700 MB of tools)"
     docker build --platform linux/amd64 -f "$ROOT/tools/unix/Dockerfile" \
-        --build-arg JIELI_TOOLCHAIN_SHA256="${JIELI_TOOLCHAIN_SHA256:-}" -t "$IMAGE" "$ROOT"
+        --build-arg JIELI_TOOLCHAIN_SHA256="${JIELI_TOOLCHAIN_SHA256:-a1545cddbc451a06bac43eb5cd96d831470c42a97c5c0b1f98879a20fc7647bd}" -t "$IMAGE" "$ROOT"
 fi
 exec docker run --rm --platform linux/amd64 --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -e FM1_SOURCE_URL="${FM1_SOURCE_URL:-}" -e FM1_NO_LTO="${FM1_NO_LTO:-}" \

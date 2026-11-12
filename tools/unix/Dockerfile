@@ -14,7 +14,7 @@ RUN curl -fsSL --retry 3 -o /tmp/pwsh.tgz \
     && mkdir -p /opt/pwsh && tar -xzf /tmp/pwsh.tgz -C /opt/pwsh && rm /tmp/pwsh.tgz \
     && chmod +x /opt/pwsh/pwsh && ln -s /opt/pwsh/pwsh /usr/local/bin/pwsh
 ARG SKIP_JIELI=0
-ARG JIELI_TOOLCHAIN_SHA256=
+ARG JIELI_TOOLCHAIN_SHA256=a1545cddbc451a06bac43eb5cd96d831470c42a97c5c0b1f98879a20fc7647bd
 COPY tools/unix/setup-toolchains.sh /opt/fm1/setup-toolchains.sh
 RUN SKIP_JIELI=${SKIP_JIELI} JIELI_TOOLCHAIN_SHA256=${JIELI_TOOLCHAIN_SHA256} sh /opt/fm1/setup-toolchains.sh /opt/fm1
 ENV FM1_TOOLS=/opt/fm1 DOTNET_CLI_TELEMETRY_OPTOUT=1 POWERSHELL_TELEMETRY_OPTOUT=1

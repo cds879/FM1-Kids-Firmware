@@ -39,6 +39,8 @@ the run's summary page. You can also start a run by hand from the Actions tab
   location of JieLi's Linux toolchain, and the WASI SDK download for
   Linux/macOS. All of M-VAVE's checks on the SDK and the finished image still
   run.
+- The JieLi toolchain download is pinned to `jieli-linux-toolchains-20260730.1`
+  (archive SHA-256 `a1545cdd…`), the version this build was verified with.
 - The Windows build checks 22 pinned toolchain hashes. The Linux toolchain has
   different files, so after the first good firmware build, run
   `./build.sh lock` and commit `tools/unix/toolchain.lock.json`. Later builds

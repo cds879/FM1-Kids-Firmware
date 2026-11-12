@@ -5,8 +5,10 @@
 #   DEST/wasi-sdk-27.0-x86_64-linux   WASI SDK 27 for the browser preview
 # Used by the Docker image and by GitHub Actions. Re-running skips what exists.
 #
-# JieLi publishes the toolchain at a moving "latest" URL. Set
-# JIELI_TOOLCHAIN_SHA256 to pin the archive; the hash is printed on download.
+# JieLi publishes the toolchain at a moving "latest" URL, so the archive is
+# pinned to jieli-linux-toolchains-20260730.1, the version this build was
+# verified with. If JieLi replaces it, the download stops with an error; set
+# JIELI_TOOLCHAIN_SHA256=any to accept a new archive and test it.
 # Set SKIP_JIELI=1 to install only the preview tools.
 set -eu
 DEST="${1:-$HOME/.fm1-toolchains}"
@@ -28,8 +30,9 @@ if [ "${SKIP_JIELI:-0}" != 1 ] && [ ! -d "$DEST/jieli/common/bin" ]; then
     curl -fsSL --retry 3 -o "$TMP/jieli.tar.xz" "$JIELI_URL"
     SUM="$(sha256sum "$TMP/jieli.tar.xz" | cut -d' ' -f1)"
     echo "setup: JieLi toolchain archive sha256 $SUM"
-    if [ -n "${JIELI_TOOLCHAIN_SHA256:-}" ] && [ "$SUM" != "$JIELI_TOOLCHAIN_SHA256" ]; then
-        echo "setup: expected $JIELI_TOOLCHAIN_SHA256 - JieLi changed the toolchain." >&2; exit 1
+    PIN="${JIELI_TOOLCHAIN_SHA256:-a1545cddbc451a06bac43eb5cd96d831470c42a97c5c0b1f98879a20fc7647bd}"
+    if [ "$PIN" != any ] && [ "$SUM" != "$PIN" ]; then
+        echo "setup: expected $PIN - JieLi changed the toolchain (JIELI_TOOLCHAIN_SHA256=any to try it)." >&2; exit 1
     fi
     mkdir -p "$TMP/jieli" && tar -xJf "$TMP/jieli.tar.xz" -C "$TMP/jieli"
     # The archive holds one jieli-linux-toolchains-<date> folder with pi32v2/ and common/.
