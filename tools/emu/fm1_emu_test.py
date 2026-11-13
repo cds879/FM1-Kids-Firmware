@@ -322,6 +322,17 @@ def kid_checks(emu, fwsc, out):
          ("PART B plays after A", 0 < counts["ab"][1] <= counts["a"][1] * 0.8,
           f"{counts['ab'][1]} notes in 8 s vs {counts['a'][1]} for A alone")]
     results[name] = c
+    # Animations: a played note floats up its tile and the tile dances; the screen settles after.
+    name = "sparks"
+    r, c = kid_run(emu, fwsc, out, name, 7000, "3000:C4@100,3500:C4^")
+    try:
+        f1, f2 = frame_lcd(out / name, 3150)[2], frame_lcd(out / name, 3400)[2]
+        s1, s2 = frame_lcd(out / name, 6000)[2], frame_lcd(out / name, 6800)[2]
+    except (FileNotFoundError, IndexError):
+        f1 = f2 = s1 = s2 = None
+    c += [("the tile moves while a note plays", f1 is not None and f1 != f2, "frames at 3.15 s and 3.4 s differ"),
+          ("the screen settles afterwards", s1 is not None and s1 == s2, "frames at 6 s and 6.8 s match")]
+    results[name] = c
     # Quiet: SEL (SCL in the emulator) mutes the chosen instrument and unmutes it again.
     name = "quiet"
     r, c = kid_run(emu, fwsc, out, name, 6500, PATTERN + ",2200:PLAY,2300:PLAY^,3000:HOME,3100:HOME^,3200:SCL,3300:SCL^,4500:SCL,4600:SCL^")
@@ -487,7 +498,7 @@ def main():
     ap.add_argument("--reference")
     ap.add_argument("--reference-label", help="how to name the reference in the summary")
     ap.add_argument("--suite", choices=["generic", "kids"], default="generic",
-                    help="kids: also test FM1 Kids behaviours (start over, songs, keys, parts, quiet, picker, instruments, sound edit, autosave, arpeggiator, battery)")
+                    help="kids: also test FM1 Kids behaviours (start over, songs, keys, parts, sparks, quiet, picker, instruments, sound edit, autosave, arpeggiator, battery)")
     a = ap.parse_args()
     out = pathlib.Path(a.out)
     results, digests = test(a.emu, a.fwsc, out / "build", a.suite)
