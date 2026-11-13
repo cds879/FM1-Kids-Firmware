@@ -332,7 +332,35 @@ def kid_checks(emu, fwsc, out):
         f1 = f2 = s1 = s2 = None
     c += [("the tile moves while a note plays", f1 is not None and f1 != f2, "frames at 3.15 s and 3.4 s differ"),
           ("the screen settles afterwards", s1 is not None and s1 == s2, "frames at 6 s and 6.8 s match")]
+    # The song playing moves the pictures too (no keys pressed).
+    r, c1 = kid_run(emu, fwsc, out, f"{name}-song", 6000, PATTERN + ",2200:HOME,2300:HOME^,2500:PLAY,2600:PLAY^")
+    try:
+        frames = [frame_lcd(out / f"{name}-song", ms)[2] for ms in range(4000, 5600, 100)]
+    except (FileNotFoundError, IndexError):
+        frames = []
+    c += [("the song makes the pictures move", len(set(frames)) >= 4, f"{len(set(frames))} different frames in 1.6 s")]
     results[name] = c
+    # Gallery: each kind of animation, frame by frame (sparks-gallery.png; also
+    # printed to the log as base64 so it can be looked at without the artifact).
+    rows = []
+    for label, turns in (("piano", ""), ("trumpet", "2000:e1:2,"), ("bells", "2000:e1:6,"), ("bass", "2000:e1:9,"),
+                         ("robot", "2000:e1:10,"), ("dream", "2000:e1:11,"), ("game", "2000:e1:12,"), ("drums", "2000:e1:14,")):
+        kid_run(emu, fwsc, out, f"{name}-{label}", 3800, turns + "3000:C4@110,3300:C4^")
+        row = []
+        for ms in (2900, 3000, 3100, 3200, 3300, 3400, 3600):
+            try:
+                row.append(crop(read_ppm(out / f"{name}-{label}" / "frames" / f"{ms // 100:06d}.ppm"),
+                                (LCD[0] + 8, LCD[1] + 92, 110, 136)))
+            except (FileNotFoundError, IndexError):
+                row.append((110, 136, b"\0" * 110 * 136 * 3))
+        rows.append(row)
+    sw, sh = 110 * 7, 136 * len(rows)
+    px = b"".join(b"".join(cell[2][r * 330:(r + 1) * 330] for cell in row) for row in rows for r in range(136))
+    write_png(out / "sparks-gallery.png", (sw, sh, px))
+    import base64
+    print("GALLERY-PNG-BEGIN")
+    print(base64.b64encode((out / "sparks-gallery.png").read_bytes()).decode())
+    print("GALLERY-PNG-END")
     # Quiet: SEL (SCL in the emulator) mutes the chosen instrument and unmutes it again.
     name = "quiet"
     r, c = kid_run(emu, fwsc, out, name, 6500, PATTERN + ",2200:PLAY,2300:PLAY^,3000:HOME,3100:HOME^,3200:SCL,3300:SCL^,4500:SCL,4600:SCL^")

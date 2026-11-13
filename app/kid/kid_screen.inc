@@ -143,11 +143,33 @@ static unsigned beat_note = 60;
  * BEAT shows and edits one part; ALGORITHM chooses it. */
 enum { PARTS = 4 };
 static unsigned part, song_parts = 1;
-/* Note sparks: each key played sends a little note floating up its tile. */
-enum { SPARKS = 6, SPARK_MS = 700 };
-static struct { uint8_t note, track; uint32_t at; } sparks[SPARKS];
+/* Animations. Each instrument moves its picture its own way when it plays
+ * (a drum jumps, a bass rumbles, a bell swings, ...) and sends its own kind
+ * of sparks out of it (notes, stars, puffs of air, rings, pixels, bangs). */
+enum { SPARKS = 10, SPARK_MS = 700, MOVE_MS = 360 };
+enum { M_HOP, M_RUMBLE, M_SWING, M_STRUM, M_PUFF, M_STEP, M_BLINK };
+enum { P_NOTE, P_STAR, P_PIXEL, P_PUFF, P_RING, P_BANG };
+static const struct { uint8_t move, spark; } kind_anim[I_COUNT] = {
+    {M_HOP, P_NOTE},   /* PIANO: hops, notes */           {M_PUFF, P_NOTE},    /* ORGAN: breathes, notes */
+    {M_PUFF, P_PUFF},  /* TRUMPET: blows, puffs */        {M_PUFF, P_PUFF},    /* FLUTE */
+    {M_SWING, P_NOTE}, /* VIOLIN: sways */                {M_SWING, P_NOTE},   /* CHOIR: sings and sways */
+    {M_SWING, P_RING}, /* BELLS: swing, rings */          {M_HOP, P_STAR},     /* XYLOPHONE: tink! stars */
+    {M_STRUM, P_NOTE}, /* GUITAR: strums */               {M_RUMBLE, P_RING},  /* BASS: rumbles, waves */
+    {M_BLINK, P_PIXEL},/* ROBOT: blinks, bits */          {M_SWING, P_STAR},   /* DREAM: floats, twinkles */
+    {M_STEP, P_PIXEL}, /* GAME: jumps in steps, pixels */ {M_HOP, P_STAR},     /* FUN */
+    {M_HOP, P_BANG}};  /* DRUMS: jump, bang! */
+static struct { uint8_t note, track, kind; uint32_t at; } sparks[SPARKS];
 static unsigned spark_next;
+static uint32_t hit_at[GROOVE_TRACKS];  /* when each instrument last started a note */
+static uint8_t last_level[GROOVE_TRACKS];
 static uint32_t clock_now;          /* this tick's time, for the animations */
+static void spark(unsigned t, unsigned note, uint32_t now)
+{
+    hit_at[t] = now | 1U;
+    sparks[spark_next].note = (uint8_t)note; sparks[spark_next].track = (uint8_t)t;
+    sparks[spark_next].at = now | 1U;
+    spark_next = (spark_next + 1U) % SPARKS;
+}
 static uint32_t part_at;
 static int octave;
 static uint32_t previous_buttons, previous_keys, notice_until, confirm_until;
@@ -637,6 +659,7 @@ static uint32_t signature(unsigned e)
                      (uint32_t)(picking && i == track) << 7 | groove_arp_enabled(i) << 8 |
                      groove_arp_setting(i, 5) << 9 | shown_kind(i) << 10;
         s = mix(s, v.audible ? v.level / 8U + 1U : 0);
+        if (hit_at[i] && clock_now - hit_at[i] < MOVE_MS) s = mix(s, (clock_now - hit_at[i]) / 30U + 1U);
         for (unsigned k = 0; k < SPARKS; ++k)
             if (sparks[k].at && sparks[k].track == i && clock_now - sparks[k].at < SPARK_MS)
                 s = mix(mix(s, sparks[k].note), (clock_now - sparks[k].at) / 25U + 1U);
@@ -788,6 +811,77 @@ static void draw_foot(void)
         }
     }
 }
+/* Sparks stay inside their tile, above its name. */
+static int clip_x0, clip_y0, clip_x1, clip_y1;
+static void cfill(int x, int y, int w, int h, uint16_t color)
+{
+    if (x < clip_x0) { w -= clip_x0 - x; x = clip_x0; }
+    if (y < clip_y0) { h -= clip_y0 - y; y = clip_y0; }
+    if (x + w > clip_x1) w = clip_x1 - x;
+    if (y + h > clip_y1) h = clip_y1 - y;
+    if (w > 0 && h > 0) fill((unsigned)x, (unsigned)y, (unsigned)w, (unsigned)h, color);
+}
+/* How a picture moves after its instrument starts a note. */
+static void tile_move(unsigned t, unsigned look_i, int *dx, int *dy, unsigned *lit)
+{
+    uint32_t age = clock_now - hit_at[t];
+    if (!hit_at[t] || age >= MOVE_MS) return;
+    int left = (int)(MOVE_MS - age);                 /* fades from MOVE_MS to 0 */
+    unsigned phase = age / 45U;
+    *lit = age < 90U;                                /* a flash as it starts */
+    switch (kind_anim[look_i].move) {
+    case M_HOP:    *dy = -left * 6 / MOVE_MS; break;                         /* jump and land */
+    case M_RUMBLE: *dx = phase & 1U ? 2 : -2; *dy = phase & 2U ? 1 : 0; break;  /* shake */
+    case M_SWING:  *dx = (phase % 4U == 0 ? 0 : phase % 4U == 1 ? 3 : phase % 4U == 2 ? 0 : -3) * left / MOVE_MS; break;
+    case M_STRUM:  *dy = phase & 1U ? 2 : -1; break;                          /* strings wobble */
+    case M_PUFF:   *dx = age < 120U ? -3 : 0; break;                          /* breathe in, blow */
+    case M_STEP:   *dy = age < 120U ? -6 : age < 240U ? -3 : 0; break;        /* 8-bit jump */
+    case M_BLINK:  *lit = (phase & 1U) == 0; break;                           /* lights flash */
+    }
+}
+/* One spark, by kind; age runs 0..SPARK_MS. */
+static void draw_spark(unsigned kind_s, unsigned note, uint32_t age, int x, int y, unsigned w, unsigned h, uint16_t ink)
+{
+    uint16_t nc = note_colors[note % 12U];
+    int cx = x + 28, cy = y + 24, a = (int)age, n = (int)(note % 12U);
+    switch (kind_s) {
+    case P_NOTE: {                                   /* a note floats up */
+        int nx = x + 5 + n * ((int)w - 14) / 11, ny = y + (int)h - 22 - a * ((int)h - 30) / SPARK_MS;
+        cfill(nx, ny + 5, 4, 3, ink); cfill(nx + 3, ny, 1, 5, ink); cfill(nx, ny + 5, 3, 2, nc);
+        break;
+    }
+    case P_STAR: {                                   /* a star twinkles up and out */
+        int sx = x + 6 + n * ((int)w - 16) / 11, sy = cy + 8 - a * 40 / SPARK_MS, r = (a / 80) & 1 ? 1 : 2;
+        cfill(sx - r, sy, 2 * r + 1, 1, nc); cfill(sx, sy - r, 1, 2 * r + 1, nc); cfill(sx, sy, 1, 1, ink);
+        break;
+    }
+    case P_PIXEL: {                                  /* blocks fly out */
+        static const int8_t dir[8][2] = {{3, -2}, {-3, -2}, {2, -3}, {-2, -3}, {3, 1}, {-3, 1}, {1, -3}, {-1, -3}};
+        int d = a * 7 / SPARK_MS;
+        cfill(cx + dir[n % 8][0] * d - 1, cy + dir[n % 8][1] * d - 1, 4, 4, nc);
+        cfill(cx + dir[(n + 3) % 8][0] * d, cy + dir[(n + 3) % 8][1] * d, 3, 3, ink);
+        break;
+    }
+    case P_PUFF: {                                   /* puffs of air out the right side */
+        int px = x + 38 + a * 18 / SPARK_MS, py = y + 14 + (n % 4) * 6;
+        cfill(px, py, 6 - a * 4 / SPARK_MS, 2, nc); cfill(px + 2, py + 4, 4, 1, ink);
+        break;
+    }
+    case P_RING: {                                   /* rings spread out */
+        int r = 4 + a * 26 / SPARK_MS;
+        cfill(cx - r, cy - r, 2 * r, 1, nc); cfill(cx - r, cy + r, 2 * r, 1, nc);
+        cfill(cx - r, cy - r, 1, 2 * r, nc); cfill(cx + r, cy - r, 1, 2 * r + 1, nc);
+        break;
+    }
+    default: {                                       /* BANG: lines burst out */
+        int r = 6 + a * 18 / SPARK_MS, l = 5;
+        cfill(cx - r - l, cy, l, 2, nc); cfill(cx + r, cy, l, 2, nc);
+        cfill(cx, cy - r - l, 2, l, nc); cfill(cx, cy + r, 2, l, ink);
+        cfill(cx + r * 2 / 3, cy - r * 2 / 3, 3, 3, ink); cfill(cx - r * 2 / 3 - 3, cy - r * 2 / 3, 3, 3, nc);
+        break;
+    }
+    }
+}
 static void draw_tile(unsigned i, unsigned x, unsigned y, unsigned w, unsigned h)
 {
     struct groove_view v;
@@ -796,20 +890,19 @@ static void draw_tile(unsigned i, unsigned x, unsigned y, unsigned w, unsigned h
     unsigned selected = i == track;
     fill(x, y, w, h, v.muted ? OFF : selected ? c : dim(c));
     if (selected) frame(x, y, w, h, 3, picking ? kid_colors[2] : INK);
-    unsigned level = v.audible && !v.muted ? v.level : 0;
-    unsigned bounce = level > 70 ? 3U : level > 35 ? 1U : 0U;   /* the picture dances to its sound */
-    picture(x + 4, y + 6 - bounce, shown_kind(i), 0, v.muted ? OFF4 : selected ? INK : SOFT);
+    unsigned level = v.audible && !v.muted ? v.level : 0, look_i = shown_kind(i);
+    int dx = 0, dy = 0;
+    unsigned lit = 0;
+    tile_move(i, look_i, &dx, &dy, &lit);
+    picture((unsigned)((int)x + 4 + dx), (unsigned)((int)y + 6 + dy), look_i, 0,
+            v.muted ? OFF4 : lit ? (selected ? BG : c) : selected ? INK : SOFT);
     if (level) fill(x + 4, y + h - 5, (w - 8) * level / 127U, 2, selected ? BG : INK);   /* how loud */
-    for (unsigned k = 0; k < SPARKS; ++k) {            /* notes floating up */
+    clip_x0 = (int)x + 3; clip_y0 = (int)y + 3; clip_x1 = (int)(x + w) - 3; clip_y1 = (int)(y + h) - 18;
+    for (unsigned k = 0; k < SPARKS; ++k) {
         uint32_t age = clock_now - sparks[k].at;
         if (!sparks[k].at || sparks[k].track != i || age >= SPARK_MS) continue;
-        unsigned nx = x + 5 + (sparks[k].note % 12U) * (w - 14) / 11U, ny = y + h - 22 - age * (h - 30) / SPARK_MS;
-        uint16_t nc = note_colors[sparks[k].note % 12U];
-        fill(nx, ny + 5, 4, 3, INK); fill(nx + 1, ny + 4, 3, 1, nc); fill(nx + 3, ny, 1, 5, INK);   /* a note */
-        fill(nx, ny + 5, 3, 2, nc);
+        draw_spark(kind_anim[look_i].spark, sparks[k].note, age, (int)x, (int)y, w, h, selected ? INK : c);
     }
-    text_center(x, w, y + h - 16, v.muted ? "QUIET" : kind_name[shown_kind(i)], 1,
-                v.muted ? SOFT : selected ? BG : INK);
     for (unsigned k = 0; k < 27; ++k)
         if (key_note[k] != 0xff && key_track[k] == i) { fill(x + w - 12, y + 6, 7, 7, INK); break; }
     if (groove_arp_enabled(i)) {                       /* arpeggiator: a little staircase */
@@ -1272,15 +1365,26 @@ void groove_screen_control(void)
             key_track[key] = (uint8_t)track;
             if (!drum_track(track)) beat_note = note;
             if (mode == KID_PLAY) {
-                sparks[spark_next].note = (uint8_t)note; sparks[spark_next].track = (uint8_t)track;
-                sparks[spark_next].at = now | 1U;
-                spark_next = (spark_next + 1U) % SPARKS;
+                spark(track, note, now);
             }
             if (chords && !drum_track(track))
                 for (unsigned i = 1, n = chord_notes(note, notes); i < n; ++i)
                     if (post(status, notes[i], 90, 3)) key_chord[key][i - 1] = notes[i];
         }
     }
+    /* The song playing makes the pictures move too: a jump in loudness is a new note. */
+    if (mode == KID_PLAY)
+        for (unsigned t = 0; t < GROOVE_TRACKS; ++t) {
+            struct groove_view v;
+            groove_get_view(t, 0, &v);
+            unsigned lvl = v.audible && !v.muted ? v.level : 0;
+            if (lvl > last_level[t] + 24U && (!hit_at[t] || since(now, hit_at[t]) > 120)) {
+                struct groove_view sv;
+                groove_get_view(t, v.play_step, &sv);
+                spark(t, sv.step.velocity ? sv.step.note : 60U + t * 5U, now);
+            }
+            last_level[t] = (uint8_t)lvl;
+        }
     if (tidy_pending) tidy_tracks(now);
     autosave(now);
     previous_buttons = c.buttons;
