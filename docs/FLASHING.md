@@ -67,11 +67,18 @@ kid interface goes on.
    Chrome or Edge on a computer. It's rebuilt from every change to `main` that
    passes the emulator tests.
 2. Connect the FM-1 with a USB-C data cable and switch it on.
-3. Press **Original FM1 Open interface (hardware test)**. On the page that
-   opens, choose **Connect device**, then **Device update**, and install. Allow
-   MIDI access when Chrome asks. Coming from stock V15, the page asks you to
-   confirm.
-4. Keep the FM-1 powered and connected until the page says it is done.
+3. Press **Original FM1 Open interface (hardware test)**. The page opens on
+   **Device update**. Press **Connect device** and allow MIDI devices when
+   Chrome asks.
+4. Coming from other firmware (stock V15 included), the page reports other
+   firmware: press **Enable force flash and reconnect**. That's M-VAVE's
+   safety step for switching firmware families, not an error.
+5. Tick **I have backed up ...**, press **Force flash** (or **Start update**)
+   and confirm.
+6. Keep the FM-1 powered and connected until the page says it is done.
+
+**Restore original V15**, under **Recovery & force update**, is the way back
+to M-VAVE's firmware; don't press it to install FM1 Kids.
 
 **Check:** the FM1 Open screen appears (eight tracks), keys play, SEQ shows
 steps, PLAY plays them, and SAVE then a power cycle keeps the project.
@@ -84,6 +91,14 @@ The same steps with **Install FM1 Kids**.
 beat that PLAY plays; the battery icon is green (with **+** on USB); a pattern
 left alone for ten seconds is still there after a power cycle; holding GLO
 shows the Bluetooth panel.
+
+**If it won't connect:** switch the FM-1 off and on, unplug and replug the
+cable, and press **Connect device** again. Only one page or app can talk to
+the FM-1 at a time, so close other tabs with a workbench page, DAWs and MIDI
+tools. Use a USB-C cable that carries data (some only charge), plugged
+straight into the computer. If Chrome blocked MIDI, allow MIDI devices from
+the icon left of the address bar and reload. **Connection details** on the
+page lists the ports the browser sees.
 
 **Testing a build that isn't on `main` yet** (a pull request): download the
 `fm1-build-…` artifact from its run under **Actions**, unzip it, run

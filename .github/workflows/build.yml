@@ -44,6 +44,9 @@ jobs:
           for f in firmware-report package-report toolchain; do cp build/dx7/$f.json build/out/kids-$f.json; done
           cp build/dx7/sdk.map build/out/kids-sdk.map
 
+      - name: Install page check
+        run: python3 tools/pages/customize.py build/out/FM1-Kids-Workbench.html /tmp/kids.html "FM1 Kids check"
+
       - name: Flash space
         run: |
           python3 - >> "$GITHUB_STEP_SUMMARY" <<'PY'
@@ -180,10 +183,11 @@ jobs:
       - name: Assemble the site
         run: |
           mkdir -p site
-          cp artifact/out/FM1-Kids-Workbench.html site/kids.html
-          cp artifact/out/FM1-Open-original-Workbench.html site/original.html
-          cp artifact/out/FM1-Kids.fwsc artifact/out/FM1-Open-original.fwsc site/
           version=$(sed -n 's/^#define KID_VERSION "\(.*\)"$/\1/p' app/kid/kid_config.h)
+          python3 tools/pages/customize.py artifact/out/FM1-Kids-Workbench.html site/kids.html "FM1 Kids $version"
+          python3 tools/pages/customize.py artifact/out/FM1-Open-original-Workbench.html site/original.html \
+            "FM1 Open, original interface (FM1 Kids $version build)"
+          cp artifact/out/FM1-Kids.fwsc artifact/out/FM1-Open-original.fwsc site/
           sed -e "s|@KID_VERSION@|$version|g" -e "s|@REPO@|${{ github.server_url }}/${{ github.repository }}|g" \
               -e "s|@SHA@|${{ github.sha }}|g" -e "s|@SHORT@|${GITHUB_SHA::7}|g" -e "s|@DATE@|$(date -u +%Y-%m-%d)|g" \
               tools/pages/index.html > site/index.html
