@@ -13,7 +13,11 @@
  *   HOME             back to PLAY mode
  *   PLAY             start / stop      REC   record what you play
  *   K1..K4           LOUD, BRIGHT, SOUND, SPEED
- *   ARP              quiet / unquiet this instrument
+ *   ARP              arpeggiator: tap for UP, DOWN, BOUNCE, RANDOM, OFF;
+ *                    hold to make it keep going after the keys are let go;
+ *                    hold and turn K1..K4: FAST (1/4..1/32), OCTAVES (1..4),
+ *                    LENGTH (gate 25..100%), SWING (0..50%); it follows SPEED
+ *   SEL              quiet / unquiet this instrument (SCL in the code)
  *   EDIT             undo              SAVE  save now (it also saves by itself)
  *   FX, then FX      start this instrument over (EDIT brings it back)
  *   OCT- / OCT+      lower / higher
@@ -70,7 +74,8 @@ static const uint8_t font[36][5] = {
 static const uint8_t punctuation[][6] = {{'!', 0, 0, 0x5f, 0, 0}, {'-', 8, 8, 8, 8, 8}, {'+', 8, 8, 0x3e, 8, 8},
                                          {'?', 2, 1, 0x51, 9, 6}, {'.', 0, 0x60, 0x60, 0, 0}, {'=', 0x14, 0x14, 0x14, 0x14, 0x14},
                                          {'#', 0x14, 0x7f, 0x14, 0x7f, 0x14}, {'<', 8, 0x14, 0x22, 0x41, 0},
-                                         {'>', 0x41, 0x22, 0x14, 8, 0}, {':', 0, 0x36, 0x36, 0, 0}};
+                                         {'>', 0x41, 0x22, 0x14, 8, 0}, {':', 0, 0x36, 0x36, 0, 0},
+                                         {'/', 0x60, 0x18, 6, 1, 0}, {'%', 0x63, 0x13, 8, 0x64, 0x63}};
 
 /* ---------- state ---------- */
 static unsigned track, mode, drum, recording, playing, play_step, retry_reset;
@@ -88,6 +93,9 @@ static unsigned ble_pick, parent;  /* parent: GLO held, the Bluetooth panel is o
 static int ble_result;
 static unsigned battery_avg, battery_level, on_usb, blink;   /* level 0..3 */
 static unsigned pick_kind, picking;   /* ALGORITHM: the instrument being chosen */
+static uint32_t arp_down_at;          /* ARP: tap cycles the style, a long hold toggles latch */
+static unsigned arp_long, arp_turned, arp_panel;   /* arp_panel: ARP held, its knobs shown */
+static const char *const arp_names[4] = {"ARP UP", "ARP DOWN", "ARP BOUNCE", "ARP RANDOM"};
 static volatile unsigned keyboard_channel;   /* read by the MIDI task */
 static uint8_t keyboard_held[128];            /* MIDI task only: channel+1 per held note */
 
@@ -168,6 +176,9 @@ static uint16_t dim(uint16_t c) { return (uint16_t)((c >> 1) & 0x7bef); }
 
 /* ---------- helpers ---------- */
 static int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
+/* Milliseconds since t, signed: stored times are "| 1" (0 = never), so they
+ * can sit 1 ms ahead of now. */
+static int32_t since(uint32_t now, uint32_t t) { return (int32_t)(now - t); }
 static int post(uint8_t command, uint8_t a, uint8_t b, unsigned bytes)
 {
     const uint8_t message[3] = {command, a, b};
@@ -272,7 +283,7 @@ static void battery_poll(unsigned raw, uint32_t now)
     while (level > 0 && battery_avg + 4U < step[level - 1]) --level;
     battery_level = level;
     blink = !on_usb && !level ? (now / 500U) & 1U : 0;
-    if (!on_usb && !level && (!warned_at || now - warned_at >= 60000U)) {
+    if (!on_usb && !level && (!warned_at || since(now, warned_at) >= 60000)) {
         warned_at = now | 1U;
         say("CHARGE ME!", STOP, now);
     }
@@ -283,7 +294,7 @@ static void autosave(uint32_t now)
 {
     if (!groove_project_dirty() || playing || recording || now - booted_at < 5000U) return;
     if (now - input_at < 8000U && !(battery_level == 0 && !on_usb)) return;
-    if (save_tried_at && now - save_tried_at < 30000U) return;
+    if (save_tried_at && since(now, save_tried_at) < 30000) return;
     save_tried_at = now | 1U;
     if (!groove_project_save_slot(groove_project_slot())) say("SAVED", GO, now);
 }
@@ -337,6 +348,11 @@ static uint32_t signature(unsigned e)
         if (parent) return 0x40000000U | ble.state | ble.role << 4 | ble.count << 6 | ble_pick << 10 |
                            (uint32_t)(ble_result & 7) << 14 | (uint32_t)ble.error << 17;
         if (confirm_until) return 0x20000000U | track;
+        if (arp_panel)
+            return 0x10000000U | track | groove_arp_enabled(track) << 3 | groove_arp_setting(track, 0) << 4 |
+                   groove_arp_setting(track, 1) << 6 | groove_arp_setting(track, 2) << 8 |
+                   groove_arp_setting(track, 3) << 10 | groove_arp_setting(track, 4) << 12 |
+                   groove_arp_setting(track, 5) << 18;
         if (notice) return 0x80000000U | ((uint32_t)(uintptr_t)notice & 0x3fffffffU);
         uint32_t s = mix(mix(mix(base, view.volume), view.program), view.tempo);
         return mix(mix(s, (uint32_t)(bright_value(track) + 1)), kind(track)) & 0x1fffffffU;
@@ -349,7 +365,7 @@ static uint32_t signature(unsigned e)
         unsigned sounding = 0;
         for (unsigned k = 0; k < 27; ++k) sounding |= key_note[k] != 0xff && key_track[k] == i;
         return (i == track) | shown_kind(i) << 1 | (uint32_t)v.muted << 4 | sounding << 5 | 1U << 6 |
-               (uint32_t)(picking && i == track) << 7;
+               (uint32_t)(picking && i == track) << 7 | groove_arp_enabled(i) << 8 | groove_arp_setting(i, 5) << 9;
     }
     if (i == 16) return base | drum << 4 | beat_note << 8 | kind(track) << 16;
     struct groove_view v;
@@ -400,6 +416,28 @@ static void draw_parent(void)
     } else text(4, 218, ble_result ? "TRY AGAIN" : "FM1 KIDS " KID_VERSION, 1, ble_result ? STOP : OFF4);
     text(4, 230, "PLAY FIND  SAVE JOIN  REC END", 1, OFF4);
 }
+/* While ARP is held: the arpeggiator's timing on K1..K4. */
+static void draw_arp(void)
+{
+    static const char *const labels[4] = {"FAST", "OCTAVES", "LENGTH", "SWING"};
+    static const char *const rates[4] = {"1/4", "1/8", "1/16", "1/32"};
+    uint16_t a = kid_colors[2];
+    text(4, 193, groove_arp_enabled(track) ? arp_names[groove_arp_setting(track, 1) & 3U] : "ARP OFF", 1, a);
+    if (groove_arp_setting(track, 5)) text(100, 193, "HOLD", 1, a);
+    text(150, 193, "TAP ARP: STYLE", 1, OFF4);
+    unsigned drums = drum_track(track);
+    for (unsigned k = 0; k < 4; ++k) {
+        unsigned x = k * 60U, v = groove_arp_setting(track, k ? k + 1U : 0U);
+        char value[8];
+        text_center(x, 60, 205, labels[k], 1, SOFT);
+        if (drums && (k == 1 || k == 2)) { text_center(x, 60, 218, "-", 2, OFF4); continue; }
+        if (k == 0) strcpy(value, rates[v & 3U]);
+        else if (k == 1) number(value, v + 1U);
+        else if (k == 2) { number(value, (v + 1U) * 25U); strcat(value, "%"); }
+        else { number(value, v); strcat(value, "%"); }
+        text_center(x, 60, 218, value, 2, INK);
+    }
+}
 static void draw_foot(void)
 {
     fill(0, 190, 240, 50, BG);
@@ -409,6 +447,7 @@ static void draw_foot(void)
         text_center(0, 240, 224, "FX = YES   EDIT = UNDO LATER", 1, SOFT);
         return;
     }
+    if (arp_panel) { draw_arp(); return; }
     if (notice) { text_center(0, 240, 204, notice, 3, notice_color); return; }
     static const char *const labels[4] = {"LOUD", "BRIGHT", "SOUND", "SPEED"};
     for (unsigned k = 0; k < 4; ++k) {
@@ -444,6 +483,10 @@ static void draw_tile(unsigned i, unsigned x, unsigned y, unsigned w, unsigned h
                 v.muted ? SOFT : selected ? BG : INK);
     for (unsigned k = 0; k < 27; ++k)
         if (key_note[k] != 0xff && key_track[k] == i) { fill(x + w - 12, y + 6, 7, 7, INK); break; }
+    if (groove_arp_enabled(i)) {                       /* arpeggiator: a little staircase */
+        uint16_t b = groove_arp_setting(i, 5) ? kid_colors[2] : selected ? BG : INK;
+        for (unsigned s = 0; s < 3; ++s) fill(x + w - 16 + s * 4U, y + h - 24 - s * 4U, 3, 3 + s * 4U, b);
+    }
 }
 static void draw_pick(void)
 {
@@ -535,7 +578,8 @@ static void leds(void)
     buttons |= playing ? BUTTON(PLAY) : 0;
     buttons |= recording ? BUTTON(REC) : 0;
     buttons |= mode == KID_BEAT ? BUTTON(SEQ) : BUTTON(HOME);
-    buttons |= view.muted ? BUTTON(ARP) : 0;
+    buttons |= view.muted ? BUTTON(SCL) : 0;
+    buttons |= groove_arp_enabled(track) ? BUTTON(ARP) : 0;
     buttons |= confirm_until ? BUTTON(FX) : 0;
     for (unsigned k = 0; k < 27; ++k)
         if (((keys ^ led_keys) >> k) & 1U) fm1_led_set(14 + k, (keys >> k) & 1U);
@@ -552,6 +596,7 @@ void groove_screen_init(void)
     previous_buttons = previous_keys = confirm_until = 0;
     input_at = save_tried_at = warned_at = picked_at = 0;
     picking = pick_kind = 0;
+    arp_down_at = 0; arp_long = arp_turned = arp_panel = 0;
     battery_avg = 0; battery_level = 3; on_usb = blink = 0;
     memset(key_note, 0xff, sizeof key_note);
     memset(shown, 0xff, sizeof shown);
@@ -618,10 +663,17 @@ void groove_screen_control(void)
         return;
     }
     if (c.encoders[0]) select_track((unsigned)clampi((int)track + c.encoders[0], 0, GROOVE_TRACKS - 1));
-    if (c.encoders[2]) groove_control_edit(track, 0, c.encoders[2], 0);
-    if (c.encoders[3]) bright_edit(c.encoders[3]);
-    if (c.encoders[4]) groove_control_edit(track, c.encoders[4], 0, 0);
-    if (c.encoders[5]) groove_tempo_edit(c.encoders[5]);
+    arp_panel = (c.buttons & BUTTON(ARP)) != 0;
+    if (arp_panel) {                                   /* ARP held: K1..K4 are its timing */
+        static const uint8_t setting[4] = {0, 2, 3, 4};   /* rate, range, gate, swing */
+        for (unsigned k = 0; k < 4; ++k)
+            if (c.encoders[2 + k]) { groove_arp_edit(track, setting[k], c.encoders[2 + k]); arp_turned = 1; }
+    } else {
+        if (c.encoders[2]) groove_control_edit(track, 0, c.encoders[2], 0);
+        if (c.encoders[3]) bright_edit(c.encoders[3]);
+        if (c.encoders[4]) groove_control_edit(track, c.encoders[4], 0, 0);
+        if (c.encoders[5]) groove_tempo_edit(c.encoders[5]);
+    }
     if (mode == KID_BEAT && (c.encoders[1] || c.encoders[6]) && drum_track(track))
         drum = (unsigned)clampi((int)drum + c.encoders[1] + c.encoders[6], 0, (int)groove_pad_count(track) - 1);
     /* ALGORITHM in PLAY: turn to choose a new instrument; it changes once the knob rests. */
@@ -631,7 +683,7 @@ void groove_screen_control(void)
         picking = 1; picked_at = now;
         say(kind_name[pick_kind], kid_colors[track], now);
     }
-    if (picking && now - picked_at >= 700U) {
+    if (picking && since(now, picked_at) >= 700) {
         picking = 0;
         if (pick_kind != kind(track)) {
             release_keys();
@@ -679,7 +731,31 @@ void groove_screen_control(void)
         say(failed ? "OOPS" : "SAVED!", failed ? STOP : GO, now);
     }
     if (pressed & BUTTON(EDIT)) say(groove_edit_undo() ? "NO UNDO" : "UNDO!", kid_colors[4], now);
-    if (pressed & BUTTON(ARP)) {
+    /* ARP: a tap steps UP, DOWN, BOUNCE, RANDOM, OFF; holding it toggles latch. */
+    if (pressed & BUTTON(ARP)) { arp_down_at = now | 1U; arp_long = arp_turned = 0; }
+    if ((c.buttons & BUTTON(ARP)) && arp_down_at && !arp_long && !arp_turned && since(now, arp_down_at) >= 800) {
+        unsigned latch = !groove_arp_setting(track, 5);
+        arp_long = 1;
+        if (!groove_arp_enabled(track)) groove_arp_set(track, 1);
+        groove_arp_edit(track, 5, latch ? 1 : -1);
+        say(latch ? "HOLD ON" : "HOLD OFF", kid_colors[2], now);
+    }
+    if ((previous_buttons & ~c.buttons & BUTTON(ARP)) && arp_down_at && !arp_long && !arp_turned) {
+        unsigned style = groove_arp_setting(track, 1);
+        if (!groove_arp_enabled(track)) {
+            groove_arp_set(track, 1);
+            groove_arp_edit(track, 1, -3);               /* start at UP */
+            say(arp_names[0], kid_colors[2], now);
+        } else if (style < 3) {
+            groove_arp_edit(track, 1, 1);
+            say(arp_names[style + 1], kid_colors[2], now);
+        } else {
+            groove_arp_set(track, 0);
+            say("ARP OFF", SOFT, now);
+        }
+    }
+    if (!(c.buttons & BUTTON(ARP))) arp_down_at = 0;
+    if (pressed & BUTTON(SCL)) {
         groove_mix_toggle(track, 0);
         groove_get_view(track, 0, &view);
         say(view.muted ? "QUIET" : "ON", view.muted ? SOFT : GO, now);

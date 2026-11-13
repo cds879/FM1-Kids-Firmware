@@ -13,7 +13,10 @@ FM-1, and checks that:
 The kid build also runs `--suite kids`:
 
 - **startover:** FX, then FX again, silences the loop; EDIT (undo) brings it back
-- **quiet:** ARP quiets the chosen instrument and brings it back
+- **quiet:** SEL quiets the chosen instrument and brings it back
+- **arp:** with the arpeggiator on, one held key plays several notes
+- **arp-timing:** FAST at 1/16 plays clearly more notes than at 1/4
+- **arp-latch:** with HOLD on, notes carry on after the key is let go
 - **picker:** turning ALGORITHM changes the tile, and the new instrument plays
 - **autosave:** a pattern left alone for a few seconds is still there after a
   power cycle, without pressing SAVE
