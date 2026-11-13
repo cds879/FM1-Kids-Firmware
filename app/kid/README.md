@@ -12,6 +12,7 @@ M-VAVE's, unchanged.
 | **ALGORITHM** knob | Change the chosen tile's instrument: piano, organ, trumpet, flute, violin, choir, bells, xylophone, guitar, bass, robot, dream, game (chiptune), fun (samples) or drums. It switches when the knob rests |
 | **Piano keys** | Play the instrument. On melodic instruments every key fits the scale (HAPPY, a C major pentatonic, to start; see EDIT) |
 | **SEQ** | BEAT mode: white keys switch the 16 steps on and off; black keys pick the drum (or note) to place. Other drums show as dots; melody steps show their note by colour and height |
+| **ALGORITHM** in BEAT | Choose the song part, A to D. Turning to a new part copies the part before it, ready to change. The song plays A, B, C, D in turn and BEAT follows along while it plays. A part with no steps left drops out of the song. In BEAT, PRESETS (or the black keys) picks the drum |
 | **HOME** | Back to the instrument tiles |
 | **PLAY** | Start / stop |
 | **REC** | Record what you play into the loop |
@@ -29,7 +30,7 @@ The battery icon shows the stock firmware's three levels, a + while on USB
 power, and flashes red with CHARGE ME! when nearly empty (the song saves
 itself then too). A keyboard on MIDI channel 1 (USB, Bluetooth or the DIN
 jack) plays the chosen instrument; channels 2–16 keep their usual tracks.
-The firmware identifies itself as `FM-1_8100001` (FM1 Kids 0.3), still in
+The firmware identifies itself as `FM-1_8100001` (FM1 Kids 0.4), still in
 M-VAVE's open range, so the workbench can install other firmware over it.
 
 **For parents, hold GLO** to open the Bluetooth MIDI panel. By default a

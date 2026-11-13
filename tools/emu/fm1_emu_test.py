@@ -310,6 +310,18 @@ def kid_checks(emu, fwsc, out):
          ("CHORDS adds notes", keyruns["chord"][2] > keyruns["happy"][2] * 1.2,
           f"peak {keyruns['chord'][2]} vs {keyruns['happy'][2]} for one note")]
     results[name] = c
+    # Song parts: in BEAT, ALGORITHM adds PART B as a copy of A. With B thinned
+    # to one step, the song (A then B) has fewer notes than A looping alone.
+    name = "parts"
+    counts = {}
+    for label, turns in (("a", ""), ("ab", ",2200:e1:1,2600:F3,2650:F3^,2800:C4,2850:C4^,3000:G4,3050:G4^")):
+        r, c1 = kid_run(emu, fwsc, out, f"{name}-{label}", 13000, PATTERN + turns + ",4000:PLAY,4100:PLAY^")
+        counts[label] = (c1[0][1], onsets(out / f"{name}-{label}", 4500, 12500))
+    c = [("emulator ran cleanly", counts["a"][0] and counts["ab"][0], "2 runs"),
+         ("part A loops", counts["a"][1] >= 8, f"{counts['a'][1]} notes in 8 s"),
+         ("PART B plays after A", 0 < counts["ab"][1] <= counts["a"][1] * 0.8,
+          f"{counts['ab'][1]} notes in 8 s vs {counts['a'][1]} for A alone")]
+    results[name] = c
     # Quiet: SEL (SCL in the emulator) mutes the chosen instrument and unmutes it again.
     name = "quiet"
     r, c = kid_run(emu, fwsc, out, name, 6500, PATTERN + ",2200:PLAY,2300:PLAY^,3000:HOME,3100:HOME^,3200:SCL,3300:SCL^,4500:SCL,4600:SCL^")
@@ -475,7 +487,7 @@ def main():
     ap.add_argument("--reference")
     ap.add_argument("--reference-label", help="how to name the reference in the summary")
     ap.add_argument("--suite", choices=["generic", "kids"], default="generic",
-                    help="kids: also test FM1 Kids behaviours (start over, songs, keys, quiet, picker, instruments, sound edit, autosave, arpeggiator, battery)")
+                    help="kids: also test FM1 Kids behaviours (start over, songs, keys, parts, quiet, picker, instruments, sound edit, autosave, arpeggiator, battery)")
     a = ap.parse_args()
     out = pathlib.Path(a.out)
     results, digests = test(a.emu, a.fwsc, out / "build", a.suite)
