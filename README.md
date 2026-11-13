@@ -13,7 +13,7 @@ sound engines.
 
 ![FM1 Kids screens: instrument tiles, drum steps, melody steps, arpeggiator settings](docs/images/screens.png)
 
-> Unofficial and not affiliated with M-VAVE. Version 0.1 passes every test in
+> Unofficial and not affiliated with M-VAVE. Version 0.2 passes every test in
 > an emulator of the FM-1 but has not yet been confirmed on a real FM-1. Back
 > up your FM-1 first; see the [flashing guide](docs/FLASHING.md).
 
