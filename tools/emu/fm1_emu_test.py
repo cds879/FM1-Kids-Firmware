@@ -280,6 +280,20 @@ def kid_checks(emu, fwsc, out):
           ("FX twice clears it", *heard(out / name, 4200, 4900, loud=False)),
           ("LFO (undo) brings it back", *heard(out / name, 5600, 7000))]
     results[name] = c
+    # Songs: ENV opens the list; a demo loads its sounds and patterns and plays;
+    # MY SONG brings the kid's own loop back.
+    name = "songs"
+    r, c = kid_run(emu, fwsc, out, name, 10000, PATTERN + ",2200:PLAY,2300:PLAY^,3000:ENV,3100:ENV^,3300:e0:1,"
+                   "3500:PLAY,3600:PLAY^,6500:e0:-1,6700:PLAY,6800:PLAY^")
+    try:
+        demo_lcd, mine_lcd = frame_lcd(out / name, 6000)[2], frame_lcd(out / name, 9500)[2]
+    except (FileNotFoundError, IndexError):
+        demo_lcd = mine_lcd = None
+    c += [("my loop plays", *heard(out / name, 2600, 3000)),
+          ("the demo song plays", *heard(out / name, 4200, 6400)),
+          ("MY SONG comes back and plays", *heard(out / name, 7400, 10000)),
+          ("the demo shows its own instruments", demo_lcd is not None and demo_lcd != mine_lcd, "screens differ")]
+    results[name] = c
     # Quiet: SEL (SCL in the emulator) mutes the chosen instrument and unmutes it again.
     name = "quiet"
     r, c = kid_run(emu, fwsc, out, name, 6500, PATTERN + ",2200:PLAY,2300:PLAY^,3000:HOME,3100:HOME^,3200:SCL,3300:SCL^,4500:SCL,4600:SCL^")
@@ -445,7 +459,7 @@ def main():
     ap.add_argument("--reference")
     ap.add_argument("--reference-label", help="how to name the reference in the summary")
     ap.add_argument("--suite", choices=["generic", "kids"], default="generic",
-                    help="kids: also test FM1 Kids behaviours (start over, quiet, picker, instruments, sound edit, autosave, arpeggiator, battery)")
+                    help="kids: also test FM1 Kids behaviours (start over, songs, quiet, picker, instruments, sound edit, autosave, arpeggiator, battery)")
     a = ap.parse_args()
     out = pathlib.Path(a.out)
     results, digests = test(a.emu, a.fwsc, out / "build", a.suite)

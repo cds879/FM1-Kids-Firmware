@@ -24,6 +24,9 @@
  *   SEL              quiet / unquiet this instrument (SCL in the code)
  *   EDIT             sound panel: K1..K4 = REVERB, ECHO, LONG (how long notes
  *                    ring), ROOM (reverb size, shared); EDIT again closes it
+ *   ENV              songs: turn SELECT to choose MY SONG or one of 16 demo
+ *                    songs, PLAY loads it (sounds and patterns) and plays;
+ *                    a demo's changes are kept in the last project slot
  *   LFO              undo              SAVE  save now (it also saves by itself)
  *   FX, then FX      start this instrument over (LFO brings it back)
  *   OCT- / OCT+      lower / higher
@@ -133,6 +136,9 @@ static int ble_result;
 static unsigned battery_avg, battery_level, on_usb, blink;   /* level 0..3 */
 static unsigned pick_kind, picking;   /* ALGORITHM: the instrument being chosen */
 static unsigned tidy_pending;         /* boot: give empty tracks their kid sound */
+static unsigned songs_panel, song_pick; /* ENV: MY SONG and the 16 demo songs */
+static unsigned my_slot;              /* the kid's own song; demos are kept in DEMO_SLOT */
+enum { DEMO_SLOT = GROOVE_PROJECT_SLOTS - 1, SONGS = 1 + GROOVE_FACTORY_PROJECTS };
 static unsigned sound_panel;          /* EDIT: REVERB, ECHO, LONG and ROOM on K1..K4 */
 static int8_t knob_dir[7];            /* knob acceleration: turning fast takes bigger steps */
 static uint8_t knob_speed[7];
@@ -269,6 +275,8 @@ static unsigned program_of(unsigned t)
     return v.program;
 }
 static void release_keys(void);
+static unsigned current_song(void);
+static void draw_songs(void);
 static int sound_values(int out[4]);
 /* The DX7 voice of instrument i nearest p, searching one way (0x100: none). */
 static unsigned dx7_voice(unsigned i, int p, int dir)
@@ -539,6 +547,8 @@ static uint32_t signature(unsigned e)
                    groove_arp_setting(track, 3) << 10 | groove_arp_setting(track, 4) << 12 |
                    groove_arp_setting(track, 5) << 18;
         if (notice) return 0x80000000U | ((uint32_t)(uintptr_t)notice & 0x3fffffffU);
+        if (songs_panel)
+            return 0x70000000U | song_pick << 8 | current_song() << 16 | playing;
         if (sound_panel) {
             int v[4];
             sound_values(v);
@@ -668,6 +678,7 @@ static void draw_foot(void)
     }
     if (arp_panel) { draw_arp(); return; }
     if (notice) { text_center(0, 240, 204, notice, 3, notice_color); return; }
+    if (songs_panel) { draw_songs(); return; }
     if (sound_panel) { draw_sound(); return; }
     static const char *const labels[4] = {"LOUD", "BRIGHT", "SOUND", "SPEED"};
     for (unsigned k = 0; k < 4; ++k) {
@@ -802,6 +813,7 @@ static void leds(void)
     buttons |= groove_arp_enabled(track) ? BUTTON(ARP) : 0;
     buttons |= confirm_until ? BUTTON(FX) : 0;
     buttons |= sound_panel ? BUTTON(EDIT) : 0;
+    buttons |= songs_panel ? BUTTON(ENV) : 0;
     for (unsigned k = 0; k < 27; ++k)
         if (((keys ^ led_keys) >> k) & 1U) fm1_led_set(14 + k, (keys >> k) & 1U);
     for (unsigned b = 0; b < 14; ++b)
@@ -827,6 +839,58 @@ static void tidy_tracks(uint32_t now)
     }
     track = keep;
     tidy_pending = 0;
+    my_slot = groove_project_slot() == DEMO_SLOT ? 0 : groove_project_slot();
+}
+
+/* Songs: 0 is MY SONG (my_slot), 1..16 the demo songs. A demo loads its
+ * sounds and patterns, then lives in DEMO_SLOT so changes to it are kept
+ * without touching MY SONG. */
+static unsigned demo_named(const char name[13])
+{
+    for (unsigned i = 0; i < GROOVE_FACTORY_PROJECTS; ++i) {
+        const char *d = groove_factory_name(i);
+        size_t n = d ? strlen(d) : 0;
+        if (n && !strncmp(name, d, n) && (n == 12 || name[n] == ' ' || !name[n])) return i + 1U;
+    }
+    return 0;
+}
+static unsigned current_song(void)
+{
+    if (groove_project_slot() != DEMO_SLOT) return 0;
+    char name[13];
+    groove_project_name(name);
+    return demo_named(name);
+}
+static int load_song(unsigned song)
+{
+    release_keys();
+    if (playing) { if (recording) groove_edit_record(0, track, 0); (void)post(0xfc, 0, 0, 1); }
+    unsigned slot = groove_project_slot();
+    /* Keep what is there first; MY SONG is always written so it can come back. */
+    if ((groove_project_dirty() || slot == my_slot) && groove_project_save_slot(slot)) return -1;
+    if (!song) return groove_project_load_slot(my_slot);
+    char name[13];
+    if (!groove_project_info(DEMO_SLOT, name) && !demo_named(name)) return -2;   /* someone else's project */
+    if (groove_factory_load(song - 1U)) return -1;
+    return groove_project_save_slot(DEMO_SLOT);
+}
+static const char *song_name(unsigned song)
+{
+    return song ? groove_factory_name(song - 1U) : "MY SONG";
+}
+static void draw_songs(void)
+{
+    char count[8];
+    unsigned n = song_pick + 1U, i = 0;
+    if (n >= 10) count[i++] = (char)('0' + n / 10U);
+    count[i++] = (char)('0' + n % 10U); count[i++] = '/';
+    count[i++] = '1'; count[i++] = '7'; count[i] = 0;
+    text(4, 193, "SONGS", 1, kid_colors[6]);
+    text(200, 193, count, 1, OFF4);
+    text(4, 207, "<", 2, SOFT);
+    text(226, 207, ">", 2, SOFT);
+    text_center(0, 240, 207, song_name(song_pick), 2, song_pick == current_song() ? GO : INK);
+    text_center(0, 240, 225, song_pick == current_song() ? "PLAY = PLAY   ENV = DONE" : "PLAY = LOAD AND PLAY", 1, OFF4);
 }
 
 /* ---------- entry points ---------- */
@@ -839,6 +903,7 @@ void groove_screen_init(void)
     picking = pick_kind = 0;
     sound_panel = 0;
     tidy_pending = 1;
+    songs_panel = song_pick = 0;
     memset(knob_dir, 0, sizeof knob_dir); memset(knob_speed, 0, sizeof knob_speed); memset(knob_at, 0, sizeof knob_at);
     arp_down_at = 0; arp_long = arp_turned = arp_panel = 0;
     battery_avg = 0; battery_level = 3; on_usb = blink = 0;
@@ -884,8 +949,13 @@ void groove_screen_control(void)
     }
     battery_poll(c.battery, now);
     /* Every track loops one row of keys. */
+    /* Every track loops one row of keys, except longer loops a demo song brings. */
     for (unsigned t = 0; t < GROOVE_TRACKS; ++t)
-        if (groove_sequence_length(t) != KID_STEPS) groove_sequence_length_set(t, KID_STEPS);
+        if (groove_sequence_length(t) != KID_STEPS) {
+            struct groove_view v;
+            groove_get_view(t, 0, &v);
+            if (!(v.active_steps >> KID_STEPS)) groove_sequence_length_set(t, KID_STEPS);
+        }
 
     fm1_ble_get_status(&ble);
     parent = (c.buttons & BUTTON(GLO)) != 0;
@@ -907,7 +977,10 @@ void groove_screen_control(void)
         paint();
         return;
     }
-    if (c.encoders[0]) select_track((unsigned)clampi((int)track + c.encoders[0], 0, GROOVE_TRACKS - 1));
+    if (songs_panel) {                                 /* ENV: SELECT, ALGORITHM or PRESETS browse the songs */
+        int d = c.encoders[0] + c.encoders[1] + c.encoders[6];
+        song_pick = (unsigned)clampi((int)song_pick + d, 0, SONGS - 1);
+    } else if (c.encoders[0]) select_track((unsigned)clampi((int)track + c.encoders[0], 0, GROOVE_TRACKS - 1));
     arp_panel = (c.buttons & BUTTON(ARP)) != 0;
     if (arp_panel) {                                   /* ARP held: K1..K4 are its timing */
         static const uint8_t setting[4] = {0, 2, 3, 4};   /* rate, range, gate, swing */
@@ -924,10 +997,10 @@ void groove_screen_control(void)
         if (c.encoders[4]) next_voice(c.encoders[4]);
         if (c.encoders[5]) groove_tempo_edit(fast(&c, 5));
     }
-    if (mode == KID_BEAT && (c.encoders[1] || c.encoders[6]) && drum_track(track))
+    if (!songs_panel && mode == KID_BEAT && (c.encoders[1] || c.encoders[6]) && drum_track(track))
         drum = (unsigned)clampi((int)drum + c.encoders[1] + c.encoders[6], 0, (int)groove_pad_count(track) - 1);
     /* ALGORITHM in PLAY: turn to choose a new instrument; it changes once the knob rests. */
-    if (mode == KID_PLAY && c.encoders[1]) {
+    if (!songs_panel && mode == KID_PLAY && c.encoders[1]) {
         if (!picking) pick_kind = look(track);
         pick_kind = (unsigned)(((int)pick_kind + c.encoders[1] % (int)I_COUNT + (int)I_COUNT) % (int)I_COUNT);
         picking = 1; picked_at = now;
@@ -962,7 +1035,21 @@ void groove_screen_control(void)
         confirm_until = (now + 4000U) | 1U;
         pressed &= ~BUTTON(FX);
     }
-    if (pressed & BUTTON(HOME)) { mode = KID_PLAY; sound_panel = 0; }
+    if (pressed & BUTTON(HOME)) { mode = KID_PLAY; sound_panel = songs_panel = 0; }
+    if (pressed & BUTTON(ENV)) {
+        songs_panel = !songs_panel;
+        if (songs_panel) { song_pick = current_song(); sound_panel = 0; }
+    }
+    if ((pressed & BUTTON(PLAY)) && songs_panel && song_pick != current_song()) {
+        int r = load_song(song_pick);
+        pressed &= ~BUTTON(PLAY);
+        if (r) say(r == -2 ? "SLOT 16 BUSY" : "OOPS", STOP, now);
+        else {
+            track = 0; drum = 0; mode = KID_PLAY;
+            say(song_name(song_pick), kid_colors[6], now);
+            (void)post(0xfa, 0, 0, 1);
+        }
+    }
     if (pressed & BUTTON(SEQ)) mode = mode == KID_BEAT ? KID_PLAY : KID_BEAT;
     if (pressed & (BUTTON(OCT_DOWN) | BUTTON(OCT_UP))) {
         release_keys();
@@ -980,7 +1067,7 @@ void groove_screen_control(void)
         int failed = groove_project_save_slot(groove_project_slot());
         say(failed ? "OOPS" : "SAVED!", failed ? STOP : GO, now);
     }
-    if (pressed & BUTTON(EDIT)) sound_panel = !sound_panel;
+    if (pressed & BUTTON(EDIT)) { sound_panel = !sound_panel; songs_panel = 0; }
     if (pressed & BUTTON(LFO)) say(groove_edit_undo() ? "NO UNDO" : "UNDO!", kid_colors[4], now);
     /* ARP: a tap steps UP, DOWN, BOUNCE, RANDOM, OFF; holding it toggles latch. */
     if (pressed & BUTTON(ARP)) { arp_down_at = now | 1U; arp_long = arp_turned = 0; }

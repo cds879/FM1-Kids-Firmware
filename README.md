@@ -13,7 +13,7 @@ sound engines.
 
 ![FM1 Kids screens: instrument tiles, drum steps, melody steps, arpeggiator settings](docs/images/screens.png)
 
-> Unofficial and not affiliated with M-VAVE. Version 0.1 passes every test in
+> Unofficial and not affiliated with M-VAVE. Version 0.2 passes every test in
 > an emulator of the FM-1 but has not yet been confirmed on a real FM-1. Back
 > up your FM-1 first; see the [flashing guide](docs/FLASHING.md).
 
@@ -32,6 +32,8 @@ sound engines.
 - **Four knobs:** LOUD, BRIGHT, SOUND (other versions of the same instrument,
   with the sound's name) and SPEED. Turning fast takes bigger steps.
 - **EDIT sound panel:** REVERB, ECHO, LONG (how long notes ring) and ROOM.
+- **16 demo songs:** ENV opens a list of M-VAVE's demo songs; each loads its
+  instruments and patterns, ready to change. MY SONG brings his own back.
 - **Hard to lose work:** songs save themselves once left alone while stopped,
   LFO is undo, and starting over asks first.
 - **Kind to small ears and parents:** a volume cap, a battery gauge with a

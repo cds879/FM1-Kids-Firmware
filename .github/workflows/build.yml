@@ -8,6 +8,24 @@ on:
   workflow_dispatch:
 
 jobs:
+  version:
+    name: Version bumped
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: KID_VERSION differs from main
+        run: |
+          now=$(sed -n 's/^#define KID_VERSION "\(.*\)"/\1/p' app/kid/kid_config.h)
+          was=$(git show origin/${{ github.base_ref }}:app/kid/kid_config.h | sed -n 's/^#define KID_VERSION "\(.*\)"/\1/p')
+          echo "main: $was  this PR: $now"
+          if [ "$now" = "$was" ]; then
+            echo "::error file=app/kid/kid_config.h::Bump KID_VERSION for every PR (main is $was)"
+            exit 1
+          fi
+
   firmware:
     name: Firmware + preview (Linux)
     runs-on: ubuntu-latest
