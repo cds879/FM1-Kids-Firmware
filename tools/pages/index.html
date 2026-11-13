@@ -30,13 +30,19 @@
   <section class="card">
     <h2>Install</h2>
     <ol>
-      <li>Use Chrome or Edge on a computer. Charge the FM-1.</li>
-      <li>Connect the FM-1 with a USB-C data cable and switch it on.</li>
-      <li>Press <strong>Install FM1 Kids</strong>. On the page that opens, choose <strong>Connect device</strong>, then
-        <strong>Device update</strong>, and install. Allow MIDI access when Chrome asks.</li>
-      <li class="warn">Keep the FM-1 connected and switched on until the page says it is done.</li>
+      <li>Use Chrome or Edge on a computer. Charge the FM-1, switch it on, and connect it straight to the computer
+        with a USB-C <em>data</em> cable. Close other MIDI apps.</li>
+      <li>Press <strong>Install FM1 Kids</strong>. The page opens on <strong>Device update</strong>: press
+        <strong>Connect device</strong> and allow MIDI devices when Chrome asks.</li>
+      <li>Coming from other firmware (stock V15, FM1 Open, ...), the page says so: press
+        <strong>Enable force flash and reconnect</strong>. This is expected.</li>
+      <li>Tick the backup box, press <strong>Force flash</strong> (or <strong>Start update</strong>) and confirm.</li>
+      <li class="warn">Keep the FM-1 connected and switched on until the page says it is done. Don't use
+        <strong>Restore original V15</strong>: that installs M-VAVE's original firmware.</li>
     </ol>
-    <p><a class="button" href="kids.html">Install FM1 Kids</a></p>
+    <p><a class="button" href="kids.html#install">Install FM1 Kids</a></p>
+    <p style="color:var(--soft);font-size:14px">Won't connect? Switch the FM-1 off and on, replug the cable, and close
+      other tabs or apps using MIDI (only one can talk to the FM-1). The install page has more tips.</p>
   </section>
 
   <section class="card">
@@ -44,12 +50,13 @@
     <p>Back up the FM-1 first, and consider installing the original FM1 Open interface built by this project once,
       to check everything works, before FM1 Kids. The <a href="@REPO@/blob/main/docs/FLASHING.md">flashing guide</a>
       explains both, and how to build the recovery dongle.</p>
-    <p><a class="button alt" href="original.html">Original FM1 Open interface (hardware test)</a></p>
+    <p><a class="button alt" href="original.html#install">Original FM1 Open interface (hardware test)</a></p>
   </section>
 
   <section class="card">
     <h2>Going back</h2>
-    <p>Each install page also carries M-VAVE's stock V15 firmware: use its stock restore under <strong>Device update</strong>.
+    <p>Each install page also carries M-VAVE's stock V15 firmware: under <strong>Device update</strong>, open
+      <strong>Recovery &amp; force update</strong> and choose <strong>Restore original V15</strong>.
       Other FM-1 firmware installs over FM1 Kids with its own installer as usual.</p>
     <p>Firmware files: <a href="FM1-Kids.fwsc">FM1-Kids.fwsc</a> · <a href="FM1-Open-original.fwsc">FM1-Open-original.fwsc</a></p>
   </section>
