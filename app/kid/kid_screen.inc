@@ -6,20 +6,26 @@
  *
  * Controls
  *   SELECT knob      choose an instrument (track)
- *   ALGORITHM knob   change the chosen instrument (piano, bass, game, ...)
+ *   ALGORITHM knob   change the chosen instrument: 15 to pick from (piano,
+ *                    organ, trumpet, flute, violin, choir, bells, xylophone,
+ *                    guitar, bass, robot, dream, game, fun, drums)
  *   piano keys       play it; melodic tracks use "happy keys" (pentatonic)
  *   SEQ              BEAT mode: white keys switch steps on/off,
  *                    black keys pick the drum (or note) to place
  *   HOME             back to PLAY mode
  *   PLAY             start / stop      REC   record what you play
- *   K1..K4           LOUD, BRIGHT, SOUND, SPEED
+ *   K1..K4           LOUD, BRIGHT, SOUND, SPEED; turn fast for big steps.
+ *                    SOUND keeps to versions of the same instrument
+ *                    (another trumpet, another bell)
  *   ARP              arpeggiator: tap for UP, DOWN, BOUNCE, RANDOM, OFF;
  *                    hold to make it keep going after the keys are let go;
  *                    hold and turn K1..K4: FAST (1/4..1/32), OCTAVES (1..4),
  *                    LENGTH (gate 25..100%), SWING (0..50%); it follows SPEED
  *   SEL              quiet / unquiet this instrument (SCL in the code)
- *   EDIT             undo              SAVE  save now (it also saves by itself)
- *   FX, then FX      start this instrument over (EDIT brings it back)
+ *   EDIT             sound panel: K1..K4 = REVERB, ECHO, LONG (how long notes
+ *                    ring), ROOM (reverb size, shared); EDIT again closes it
+ *   LFO              undo              SAVE  save now (it also saves by itself)
+ *   FX, then FX      start this instrument over (LFO brings it back)
  *   OCT- / OCT+      lower / higher
  *   hold GLO         parent Bluetooth panel: +PLAY search for MIDI keyboards,
  *                    +SELECT choose, +SAVE connect, +REC disconnect,
@@ -46,17 +52,50 @@ static const uint8_t black_keys[11] = {1, 3, 5, 8, 10, 13, 15, 17, 20, 22, 25};
 /* Happy keys: every pitch snaps down to C major pentatonic, so nothing clashes. */
 static const uint8_t happy[12] = {0, 0, 2, 2, 4, 4, 4, 7, 7, 9, 9, 9};
 static const uint8_t happy_notes[11] = {60, 62, 64, 67, 69, 72, 74, 76, 79, 81, 84};
-static const char *const kind_name[GROOVE_SOURCES] = {"PIANO", "BASS", "DRUMS", "GAME", "GUITAR", "FUN"};
+/* Kid instruments: what the picker offers and the tiles show. Several use the
+ * DX7 engine with a chosen factory voice; the others are whole engines. */
+enum { I_PIANO, I_ORGAN, I_TRUMPET, I_FLUTE, I_VIOLIN, I_CHOIR, I_BELLS, I_XYLO,
+       I_GUITAR, I_BASS, I_ROBOT, I_DREAM, I_GAME, I_FUN, I_DRUMS, I_COUNT };
+static const char *const kind_name[I_COUNT] = {"PIANO", "ORGAN", "TRUMPET", "FLUTE", "VIOLIN", "CHOIR",
+                                               "BELLS", "XYLOPHONE", "GUITAR", "BASS", "ROBOT", "DREAM",
+                                               "GAME", "FUN", "DRUMS"};
+/* Engine and starting DX7 voice for each (0xff: not DX7). Swap voices freely. */
+static const struct { uint8_t engine, program; } kind_sound[I_COUNT] = {
+    {GROOVE_DX7, 0},   {GROOVE_DX7, 1},    {GROOVE_DX7, 64},  {GROOVE_DX7, 65},   {GROOVE_DX7, 66},
+    {GROOVE_DX7, 67},  {GROOVE_DX7, 120},  {GROOVE_DX7, 117}, {GROOVE_PLUCK, 0xff}, {GROOVE_DX7, 34},
+    {GROOVE_DX7, 2},   {GROOVE_DX7, 3},    {GROOVE_PSG, 0xff}, {GROOVE_SAMPLE, 0xff}, {GROOVE_808, 0xff}};
+/* A second engine SOUND moves on to: guitar goes pluck -> DX7 guitars,
+ * bass goes DX7 basses -> the 303 bass line. */
+static const uint8_t kind_other[I_COUNT] = {
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, GROOVE_DX7, GROOVE_303, 0xff, 0xff, 0xff, 0xff, 0xff};
 /* Pictures: 16x12 drawn 3x, or 24x18 drawn 2x (same size on screen); the
- * leftmost pixel is the highest used bit. Order follows enum groove_source. */
-static const struct { uint8_t w, h; uint32_t rows[18]; } kind_icon[GROOVE_SOURCES] = {
-    {16, 12, {0x0000, 0xffff, 0x96b5, 0x96b5, 0x96b5, 0x96b5, 0xddb7, 0xddb7, 0xddb7, 0xffff, 0x0000, 0x0000}},
-    {16, 12, {0x0030, 0x0038, 0x002c, 0x0026, 0x0022, 0x0020, 0x0020, 0x0020, 0x03e0, 0x07e0, 0x07c0, 0x0380}},
-    {16, 12, {0x8001, 0x4002, 0x2004, 0x1008, 0x3ffc, 0x4002, 0x7ffe, 0x5555, 0x5555, 0x5555, 0x7ffe, 0x0000}},
-    {16, 12, {0x1010, 0x0820, 0x1ff0, 0x37d8, 0x7ffc, 0x5ff4, 0x5014, 0x0c60, 0x0000, 0x0000, 0x0000, 0x0000}},
-    {24, 18, {0x000014, 0x00001e, 0x00003c, 0x000028, 0x000060, 0x0000c0, 0x003b00, 0x007f00, 0x01fe00,
+ * leftmost pixel is the highest used bit. Order follows the kid instruments. */
+static const struct { uint8_t w, h; uint32_t rows[18]; } kind_icon[I_COUNT] = {
+    /* PIANO */ {16, 12, {0x0000, 0xffff, 0x96b5, 0x96b5, 0x96b5, 0x96b5, 0xddb7, 0xddb7, 0xddb7, 0xffff, 0x0000, 0x0000}},
+    /* ORGAN */ {24, 18, {0x003000, 0x01b600, 0x01b600, 0x01b600, 0x0db6c0, 0x0db6c0, 0x0db6c0, 0x6db6d8, 0x6db6d8,
+                         0x6db6d8, 0x492490, 0x6db6d8, 0x6db6d8, 0xffffff, 0xffffff, 0xdb6db6, 0xdb6db6, 0xffffff}},
+    /* TRUMPET */ {24, 18, {0x000000, 0x000000, 0x03fe00, 0x036c01, 0x036c07, 0x036c1f, 0x036c7f, 0xc36cff, 0xffffff,
+                         0xc603ff, 0x06037f, 0x06033f, 0x03ff0f, 0x000003, 0x000000, 0x000000, 0x000000, 0x000000}},
+    /* FLUTE */ {24, 18, {0x000000, 0x000000, 0x000006, 0x00001e, 0x00003e, 0x0000d8, 0x0003f0, 0x000ec0, 0x003700,
+                         0x00dc00, 0x01f000, 0x06c000, 0x1f8000, 0x6e0000, 0x780000, 0x600000, 0x000000, 0x000000}},
+    /* VIOLIN */ {24, 18, {0x006000, 0x006300, 0x006200, 0x006300, 0x006100, 0x01f880, 0x01f8c0, 0x03fc40, 0x03fc20,
+                         0x017830, 0x017810, 0x037c08, 0x077e0c, 0x07fe04, 0x03fc02, 0x03fc02, 0x01f800, 0x000000}},
+    /* CHOIR */ {24, 18, {0x000000, 0x03c000, 0x0ff000, 0x1ff802, 0x3ffc3a, 0x7ffe3e, 0x7ffe36, 0x73ce32, 0x7ffe36,
+                         0x7ffe3e, 0x7c3e3e, 0x7c3e30, 0x7c3ef0, 0x3c3cf0, 0x1e78e0, 0x0ff000, 0x03c000, 0x000000}},
+    /* BELLS */ {24, 18, {0x001800, 0x001800, 0x003c00, 0x007e00, 0x00ff00, 0x00ff00, 0x00ff00, 0x00ff00, 0x00ff00,
+                         0x01ff80, 0x01ff80, 0x01ff80, 0x03ffc0, 0x07ffe0, 0x0ffff0, 0x003c00, 0x003c00, 0x001800}},
+    /* XYLO */ {24, 18, {0x000007, 0x000007, 0x000007, 0x700003, 0x500006, 0x77000c, 0x750018, 0x777030, 0x775060,
+                         0x7777c0, 0x777500, 0x777770, 0x777750, 0x777770, 0x777770, 0x555550, 0x777770, 0x000000}},
+    /* GUITAR */ {24, 18, {0x000014, 0x00001e, 0x00003c, 0x000028, 0x000060, 0x0000c0, 0x003b00, 0x007f00, 0x01fe00,
               0x07cf00, 0x0f8600, 0x1f8e00, 0x1ffc00, 0x1ff800, 0x1ff000, 0x1ff000, 0x0fe000, 0x07c000}},
-    {16, 12, {0x0100, 0x0100, 0x0380, 0xfff8, 0x7ff0, 0x3fe0, 0x1fc0, 0x3de0, 0x38e0, 0x6030, 0x0000, 0x0000}}};
+    /* BASS */ {16, 12, {0x0030, 0x0038, 0x002c, 0x0026, 0x0022, 0x0020, 0x0020, 0x0020, 0x03e0, 0x07e0, 0x07c0, 0x0380}},
+    /* ROBOT */ {24, 18, {0x001800, 0x001800, 0x001800, 0x0ffff0, 0x0ffff0, 0x0ffff0, 0x0ffff0, 0x0e3c70, 0x3e3c7c,
+                         0x3e3c7c, 0x3ffffc, 0x3ffffc, 0x3ffffc, 0x0edb70, 0x0edb70, 0x0ffff0, 0x0ffff0, 0x000000}},
+    /* DREAM */ {24, 18, {0x000010, 0x000038, 0x0600fe, 0x1c007c, 0x3c0038, 0x38006c, 0x780082, 0x780000, 0x780000,
+                         0xf80000, 0x7c0004, 0x7e000e, 0x7f0004, 0x3fc000, 0x3ff820, 0x1ff870, 0x07e020, 0x000000}},
+    /* GAME */ {16, 12, {0x1010, 0x0820, 0x1ff0, 0x37d8, 0x7ffc, 0x5ff4, 0x5014, 0x0c60, 0x0000, 0x0000, 0x0000, 0x0000}},
+    /* FUN */ {16, 12, {0x0100, 0x0100, 0x0380, 0xfff8, 0x7ff0, 0x3fe0, 0x1fc0, 0x3de0, 0x38e0, 0x6030, 0x0000, 0x0000}},
+    /* DRUMS */ {16, 12, {0x8001, 0x4002, 0x2004, 0x1008, 0x3ffc, 0x4002, 0x7ffe, 0x5555, 0x5555, 0x5555, 0x7ffe, 0x0000}}};
 /* Five columns per glyph, bit 0 at the top: digits, then A..Z (M-VAVE's font). */
 static const uint8_t font[36][5] = {
     {0x3e, 0x51, 0x49, 0x45, 0x3e}, {0, 0x42, 0x7f, 0x40, 0},       {0x42, 0x61, 0x51, 0x49, 0x46},
@@ -93,6 +132,10 @@ static unsigned ble_pick, parent;  /* parent: GLO held, the Bluetooth panel is o
 static int ble_result;
 static unsigned battery_avg, battery_level, on_usb, blink;   /* level 0..3 */
 static unsigned pick_kind, picking;   /* ALGORITHM: the instrument being chosen */
+static unsigned sound_panel;          /* EDIT: REVERB, ECHO, LONG and ROOM on K1..K4 */
+static int8_t knob_dir[7];            /* knob acceleration: turning fast takes bigger steps */
+static uint8_t knob_speed[7];
+static uint32_t knob_at[7];
 static uint32_t arp_down_at;          /* ARP: tap cycles the style, a long hold toggles latch */
 static unsigned arp_long, arp_turned, arp_panel;   /* arp_panel: ARP held, its knobs shown */
 static const char *const arp_names[4] = {"ARP UP", "ARP DOWN", "ARP BOUNCE", "ARP RANDOM"};
@@ -192,7 +235,82 @@ static void say(const char *s, uint16_t color, uint32_t now)
 }
 static unsigned drum_track(unsigned t) { return groove_pad_count(t) != 0; }
 static unsigned kind(unsigned t) { unsigned k = groove_source_type(t); return k < GROOVE_SOURCES ? k : 0; }
-static unsigned shown_kind(unsigned t) { return picking && t == track ? pick_kind : kind(t); }
+/* Which kid instrument a DX7 voice sounds like (the factory bank repeats in fours). */
+static unsigned voice_look(unsigned p)
+{
+    static const uint8_t low[4] = {I_PIANO, I_ORGAN, I_ROBOT, I_DREAM}, high[4] = {I_TRUMPET, I_FLUTE, I_VIOLIN, I_CHOIR};
+    /* 96..127, the odd ones: bells and metal, tuned wood and drums, dreamy, the rest robots. */
+    static const uint8_t odd[32] = {
+        I_ROBOT, I_ROBOT, I_XYLO,  I_DREAM, I_BELLS, I_BELLS, I_ROBOT, I_ROBOT,   /*  96 BOWOAN .. 103 MONO M */
+        I_BELLS, I_XYLO,  I_BELLS, I_ROBOT, I_BELLS, I_XYLO,  I_ROBOT, I_DREAM,   /* 104 TIBET .. 111 DESCENT */
+        I_BELLS, I_XYLO,  I_XYLO,  I_ROBOT, I_BELLS, I_XYLO,  I_BELLS, I_ROBOT,   /* 112 CLANG BELL .. 119 */
+        I_BELLS, I_ROBOT, I_XYLO,  I_ROBOT, I_DREAM, I_XYLO,  I_ROBOT, I_ROBOT};  /* 120 TUB BELLS .. 127 */
+    if (p < 32) return low[p % 4U];
+    if (p < 64) return p % 4U < 2 ? I_GUITAR : I_BASS;
+    if (p < 96) return high[p % 4U];
+    return odd[(p - 96U) & 31U];
+}
+/* The kid instrument a track is playing now. */
+static unsigned look(unsigned t)
+{
+    static const uint8_t by_engine[GROOVE_SOURCES] = {I_PIANO, I_BASS, I_DRUMS, I_GAME, I_GUITAR, I_FUN};
+    unsigned k = kind(t);
+    if (k != GROOVE_DX7) return by_engine[k];
+    struct groove_view v;
+    groove_get_view(t, 0, &v);
+    return voice_look(v.program);
+}
+static unsigned shown_kind(unsigned t) { return picking && t == track ? pick_kind : look(t); }
+static unsigned program_of(unsigned t)
+{
+    struct groove_view v;
+    groove_get_view(t, 0, &v);
+    return v.program;
+}
+static void release_keys(void);
+static int sound_values(int out[4]);
+/* The DX7 voice of instrument i nearest p, searching one way (0x100: none). */
+static unsigned dx7_voice(unsigned i, int p, int dir)
+{
+    for (; p >= 0 && p < 128; p += dir)
+        if (voice_look((unsigned)p) == i) return (unsigned)p;
+    return 0x100;
+}
+static void set_program(unsigned p) { groove_control_edit(track, (int)p - (int)program_of(track), 0, 0); }
+/* Turn this track into kid instrument i: its engine, then its starting voice. */
+static int set_look(unsigned i)
+{
+    if (kind(track) != kind_sound[i].engine && groove_source_set(track, kind_sound[i].engine)) return 1;
+    if (kind_sound[i].program != 0xff) set_program(kind_sound[i].program);
+    return 0;
+}
+/* SOUND: the next (or previous) version of the same instrument. GUITAR and BASS
+ * have two engines; SOUND runs through one, then the other. */
+static void next_voice(int steps)
+{
+    int dir = steps > 0 ? 1 : -1;
+    for (; steps; steps -= dir) {
+        unsigned i = look(track), k = kind(track), before = program_of(track);
+        unsigned other = kind_other[i];
+        if (k == GROOVE_DX7) {
+            unsigned p = dx7_voice(i, (int)before + dir, dir);
+            if (p > 127 && other != 0xff) {                /* past the last DX7 version */
+                release_keys();
+                if (groove_source_set(track, other)) return;
+                continue;
+            }
+            if (p > 127) p = dx7_voice(i, dir > 0 ? 0 : 127, dir);   /* around again */
+            if (p <= 127) set_program(p);
+        } else {
+            groove_control_edit(track, dir, 0, 0);
+            if (program_of(track) != before || other != GROOVE_DX7) continue;
+            release_keys();                                /* past the engine's last sound */
+            if (groove_source_set(track, GROOVE_DX7)) return;
+            unsigned p = dx7_voice(i, dir > 0 ? 0 : 127, dir);
+            if (p <= 127) set_program(p);
+        }
+    }
+}
 static void release_keys(void)
 {
     for (unsigned key = 0; key < 27; ++key)
@@ -253,6 +371,72 @@ static void bright_edit(int delta)
     if (!bright_target(track, &b)) return;
     if (b.fm) groove_fm_edit(track, b.param, delta);
     else groove_tone_edit(track, b.part, b.param, delta);
+}
+/* LONG: how long notes ring after the key is let go. DX7: every operator's
+ * release rate; other engines: their release/decay/length setting. */
+enum { LONG_SLOWEST = 30 };   /* DX7 release rate: about a few seconds at most */
+static int long_target(unsigned t, struct bright *b)
+{
+    b->fm = kind(t) == GROOVE_DX7;
+    b->part = drum_track(t) ? drum : 0;
+    if (b->fm) { b->param = 3; b->max = 99; return 1; }
+    static const char *const names[] = {"RELEASE", "Release", "DECAY", "Decay", "Length"};
+    unsigned n = groove_tone_count(t, b->part);
+    for (unsigned w = 0; w < sizeof names / sizeof names[0]; ++w)
+        for (unsigned i = 0; i < n; ++i) {
+            const fm1_param_t *p = groove_tone_parameter(t, b->part, i);
+            if (p && p->max && !strcmp(p->name, names[w])) { b->param = i; b->max = p->max; return 1; }
+        }
+    return 0;
+}
+static int long_value(unsigned t)   /* 0..100, or -1 when the engine has none */
+{
+    struct bright b;
+    if (!long_target(t, &b)) return -1;
+    if (b.fm) {
+        uint8_t patch[156];
+        if (groove_fm_copy(t, patch, NULL)) return -1;
+        unsigned sum = 0;
+        for (unsigned op = 0; op < 6; ++op) {
+            unsigned r = patch[op * 21U + 3U];
+            sum += r > 99 ? 99U : r < LONG_SLOWEST ? LONG_SLOWEST : r;
+        }
+        return (int)((99U * 6U - sum) * 100U / ((99U - LONG_SLOWEST) * 6U));
+    }
+    uint8_t v[GROOVE_TONE_PARAMS];
+    return groove_tone_copy(t, b.part, v) <= (int)b.param ? -1 : (int)v[b.param] * 100 / (int)b.max;
+}
+static void long_edit(int delta)
+{
+    struct bright b;
+    if (!long_target(track, &b)) return;
+    if (!b.fm) { groove_tone_edit(track, b.part, b.param, delta); return; }
+    uint8_t patch[156];
+    if (groove_fm_copy(track, patch, NULL)) return;
+    for (unsigned op = 0; op < 6; ++op) {          /* a slower release rate rings longer */
+        int r = patch[op * 21U + 3U] > 99 ? 99 : patch[op * 21U + 3U];
+        int next = clampi(r - delta, r < LONG_SLOWEST ? r : LONG_SLOWEST, 99);  /* never a note that never ends */
+        if (next != r) groove_fm_edit(track, op * 21U + 3U, next - r);
+    }
+}
+/* Knob acceleration (as in M-VAVE's UI): a fast turn in one direction grows
+ * the step up to 4x; a pause or a change of direction is fine again. */
+static void knobs_read(const struct fm1_controls *c, uint32_t now)
+{
+    for (unsigned i = 0; i < 7; ++i) {
+        int dir = (c->encoders[i] > 0) - (c->encoders[i] < 0);
+        if (!dir) continue;
+        knob_speed[i] = dir == knob_dir[i] && now - knob_at[i] <= 40U ? (uint8_t)clampi(knob_speed[i] + 1, 1, 4) : 1;
+        knob_dir[i] = (int8_t)dir;
+        knob_at[i] = now;
+    }
+}
+static int fast(const struct fm1_controls *c, unsigned i)
+{
+    int v = c->encoders[i], amount = v < 0 ? -v : v;
+    int gain = amount < 2 ? 1 : amount < 4 ? 2 : amount == 4 ? 3 : 4;
+    if (gain < knob_speed[i]) gain = knob_speed[i];
+    return v * gain;
 }
 static void sound_name(unsigned t, char out[12])
 {
@@ -354,6 +538,12 @@ static uint32_t signature(unsigned e)
                    groove_arp_setting(track, 3) << 10 | groove_arp_setting(track, 4) << 12 |
                    groove_arp_setting(track, 5) << 18;
         if (notice) return 0x80000000U | ((uint32_t)(uintptr_t)notice & 0x3fffffffU);
+        if (sound_panel) {
+            int v[4];
+            sound_values(v);
+            return (mix(mix(mix(mix(0x51U + track, (uint32_t)v[0]), (uint32_t)v[1]), (uint32_t)(v[2] + 1)), (uint32_t)v[3])
+                    & 0x0fffffffU) | 0x60000000U;
+        }
         uint32_t s = mix(mix(mix(base, view.volume), view.program), view.tempo);
         return mix(mix(s, (uint32_t)(bright_value(track) + 1)), kind(track)) & 0x1fffffffU;
     }
@@ -364,10 +554,11 @@ static uint32_t signature(unsigned e)
         groove_get_view(i, 0, &v);
         unsigned sounding = 0;
         for (unsigned k = 0; k < 27; ++k) sounding |= key_note[k] != 0xff && key_track[k] == i;
-        return (i == track) | shown_kind(i) << 1 | (uint32_t)v.muted << 4 | sounding << 5 | 1U << 6 |
-               (uint32_t)(picking && i == track) << 7 | groove_arp_enabled(i) << 8 | groove_arp_setting(i, 5) << 9;
+        return (i == track) | (uint32_t)v.muted << 4 | sounding << 5 | 1U << 6 |
+               (uint32_t)(picking && i == track) << 7 | groove_arp_enabled(i) << 8 | groove_arp_setting(i, 5) << 9 |
+               shown_kind(i) << 10;
     }
-    if (i == 16) return base | drum << 4 | beat_note << 8 | kind(track) << 16;
+    if (i == 16) return base | drum << 4 | beat_note << 8 | look(track) << 16;
     struct groove_view v;
     groove_get_view(track, i, &v);
     uint32_t s = mix(mix(mix(base, v.step.drums), v.step.velocity ? v.step.note + 1U : 0), drum);
@@ -438,17 +629,45 @@ static void draw_arp(void)
         text_center(x, 60, 218, value, 2, INK);
     }
 }
+/* EDIT: the sound panel, REVERB, ECHO, LONG and ROOM on K1..K4. */
+static int sound_values(int out[4])
+{
+    uint8_t sends[2], fx[4];
+    groove_sends_get(track, sends);
+    groove_effects_get(fx);
+    out[0] = sends[0] * 100 / 15;
+    out[1] = sends[1] * 100 / 15;
+    out[2] = long_value(track);
+    out[3] = fx[0] > 100 ? 100 : fx[0];
+    return 0;
+}
+static void draw_sound(void)
+{
+    static const char *const labels[4] = {"REVERB", "ECHO", "LONG", "ROOM"};
+    int v[4];
+    sound_values(v);
+    text(4, 193, "SOUND EDIT", 1, kid_colors[4]);
+    text(150, 193, "EDIT: DONE", 1, OFF4);
+    for (unsigned k = 0; k < 4; ++k) {
+        unsigned x = k * 60U;
+        text_center(x, 60, 205, labels[k], 1, SOFT);
+        if (v[k] < 0) { text_center(x, 60, 218, "-", 2, OFF4); continue; }
+        fill(x + 8, 220, 44, 10, OFF);
+        fill(x + 8, 220, (unsigned)v[k] * 44U / 100U, 10, kid_colors[k * 2U % 8U]);
+    }
+}
 static void draw_foot(void)
 {
     fill(0, 190, 240, 50, BG);
     if (parent) { draw_parent(); return; }
     if (confirm_until) {
         text_center(0, 240, 196, "START OVER?", 3, STOP);
-        text_center(0, 240, 224, "FX = YES   EDIT = UNDO LATER", 1, SOFT);
+        text_center(0, 240, 224, "FX = YES   LFO = UNDO LATER", 1, SOFT);
         return;
     }
     if (arp_panel) { draw_arp(); return; }
     if (notice) { text_center(0, 240, 204, notice, 3, notice_color); return; }
+    if (sound_panel) { draw_sound(); return; }
     static const char *const labels[4] = {"LOUD", "BRIGHT", "SOUND", "SPEED"};
     for (unsigned k = 0; k < 4; ++k) {
         unsigned x = k * 60U;
@@ -492,7 +711,7 @@ static void draw_pick(void)
 {
     fill(0, 42, 240, 40, BG);
     uint16_t c = kid_colors[track];
-    picture(4, 46, kind(track), 1, c);
+    picture(4, 46, look(track), 1, c);
     const char *name = drum_track(track) ? groove_pad_name(track, drum) : NULL;
     char tune[8] = "NOTE ";
     if (!name) {
@@ -581,6 +800,7 @@ static void leds(void)
     buttons |= view.muted ? BUTTON(SCL) : 0;
     buttons |= groove_arp_enabled(track) ? BUTTON(ARP) : 0;
     buttons |= confirm_until ? BUTTON(FX) : 0;
+    buttons |= sound_panel ? BUTTON(EDIT) : 0;
     for (unsigned k = 0; k < 27; ++k)
         if (((keys ^ led_keys) >> k) & 1U) fm1_led_set(14 + k, (keys >> k) & 1U);
     for (unsigned b = 0; b < 14; ++b)
@@ -596,6 +816,8 @@ void groove_screen_init(void)
     previous_buttons = previous_keys = confirm_until = 0;
     input_at = save_tried_at = warned_at = picked_at = 0;
     picking = pick_kind = 0;
+    sound_panel = 0;
+    memset(knob_dir, 0, sizeof knob_dir); memset(knob_speed, 0, sizeof knob_speed); memset(knob_at, 0, sizeof knob_at);
     arp_down_at = 0; arp_long = arp_turned = arp_panel = 0;
     battery_avg = 0; battery_level = 3; on_usb = blink = 0;
     memset(key_note, 0xff, sizeof key_note);
@@ -625,6 +847,7 @@ void groove_screen_control(void)
     struct fm1_controls c;
     fm1_controls_read(&c);
     uint32_t now = fm1_millis();
+    knobs_read(&c, now);
     groove_master_update(c.knob < KID_MASTER_LIMIT ? c.knob : KID_MASTER_LIMIT);
     uint32_t pressed = c.buttons & ~previous_buttons;
     uint32_t key_down = c.keys & ~previous_keys;
@@ -668,26 +891,31 @@ void groove_screen_control(void)
         static const uint8_t setting[4] = {0, 2, 3, 4};   /* rate, range, gate, swing */
         for (unsigned k = 0; k < 4; ++k)
             if (c.encoders[2 + k]) { groove_arp_edit(track, setting[k], c.encoders[2 + k]); arp_turned = 1; }
+    } else if (sound_panel) {                          /* EDIT: the sound panel */
+        if (c.encoders[2]) groove_sends_edit(track, 0, c.encoders[2]);
+        if (c.encoders[3]) groove_sends_edit(track, 1, c.encoders[3]);
+        if (c.encoders[4]) long_edit(fast(&c, 4));
+        if (c.encoders[5]) groove_effects_edit(0, fast(&c, 5));
     } else {
-        if (c.encoders[2]) groove_control_edit(track, 0, c.encoders[2], 0);
-        if (c.encoders[3]) bright_edit(c.encoders[3]);
-        if (c.encoders[4]) groove_control_edit(track, c.encoders[4], 0, 0);
-        if (c.encoders[5]) groove_tempo_edit(c.encoders[5]);
+        if (c.encoders[2]) groove_control_edit(track, 0, fast(&c, 2), 0);
+        if (c.encoders[3]) bright_edit(kind(track) == GROOVE_DX7 ? c.encoders[3] : fast(&c, 3));
+        if (c.encoders[4]) next_voice(c.encoders[4]);
+        if (c.encoders[5]) groove_tempo_edit(fast(&c, 5));
     }
     if (mode == KID_BEAT && (c.encoders[1] || c.encoders[6]) && drum_track(track))
         drum = (unsigned)clampi((int)drum + c.encoders[1] + c.encoders[6], 0, (int)groove_pad_count(track) - 1);
     /* ALGORITHM in PLAY: turn to choose a new instrument; it changes once the knob rests. */
     if (mode == KID_PLAY && c.encoders[1]) {
-        if (!picking) pick_kind = kind(track);
-        pick_kind = (unsigned)(((int)pick_kind + c.encoders[1] % (int)GROOVE_SOURCES + (int)GROOVE_SOURCES) % (int)GROOVE_SOURCES);
+        if (!picking) pick_kind = look(track);
+        pick_kind = (unsigned)(((int)pick_kind + c.encoders[1] % (int)I_COUNT + (int)I_COUNT) % (int)I_COUNT);
         picking = 1; picked_at = now;
         say(kind_name[pick_kind], kid_colors[track], now);
     }
     if (picking && since(now, picked_at) >= 700) {
         picking = 0;
-        if (pick_kind != kind(track)) {
+        if (pick_kind != look(track) || kind(track) != kind_sound[pick_kind].engine) {
             release_keys();
-            if (groove_source_set(track, pick_kind)) say("OOPS", STOP, now);
+            if (set_look(pick_kind)) say("OOPS", STOP, now);
             drum = 0;
         }
     }
@@ -712,7 +940,7 @@ void groove_screen_control(void)
         confirm_until = (now + 4000U) | 1U;
         pressed &= ~BUTTON(FX);
     }
-    if (pressed & BUTTON(HOME)) mode = KID_PLAY;
+    if (pressed & BUTTON(HOME)) { mode = KID_PLAY; sound_panel = 0; }
     if (pressed & BUTTON(SEQ)) mode = mode == KID_BEAT ? KID_PLAY : KID_BEAT;
     if (pressed & (BUTTON(OCT_DOWN) | BUTTON(OCT_UP))) {
         release_keys();
@@ -730,7 +958,8 @@ void groove_screen_control(void)
         int failed = groove_project_save_slot(groove_project_slot());
         say(failed ? "OOPS" : "SAVED!", failed ? STOP : GO, now);
     }
-    if (pressed & BUTTON(EDIT)) say(groove_edit_undo() ? "NO UNDO" : "UNDO!", kid_colors[4], now);
+    if (pressed & BUTTON(EDIT)) sound_panel = !sound_panel;
+    if (pressed & BUTTON(LFO)) say(groove_edit_undo() ? "NO UNDO" : "UNDO!", kid_colors[4], now);
     /* ARP: a tap steps UP, DOWN, BOUNCE, RANDOM, OFF; holding it toggles latch. */
     if (pressed & BUTTON(ARP)) { arp_down_at = now | 1U; arp_long = arp_turned = 0; }
     if ((c.buttons & BUTTON(ARP)) && arp_down_at && !arp_long && !arp_turned && since(now, arp_down_at) >= 800) {

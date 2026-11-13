@@ -273,12 +273,12 @@ def heard(work, start, end, loud=True):
 
 def kid_checks(emu, fwsc, out):
     results = {}
-    # Start over: FX asks, FX again clears; EDIT (undo) brings the loop back.
+    # Start over: FX asks, FX again clears; LFO (undo) brings the loop back.
     name = "startover"
-    r, c = kid_run(emu, fwsc, out, name, 7000, PATTERN + ",2200:PLAY,2300:PLAY^,3000:FX,3100:FX^,3300:FX,3400:FX^,5000:EDIT,5100:EDIT^")
+    r, c = kid_run(emu, fwsc, out, name, 7000, PATTERN + ",2200:PLAY,2300:PLAY^,3000:FX,3100:FX^,3300:FX,3400:FX^,5000:LFO,5100:LFO^")
     c += [("loop plays", *heard(out / name, 2600, 3000)),
           ("FX twice clears it", *heard(out / name, 4200, 4900, loud=False)),
-          ("EDIT brings it back", *heard(out / name, 5600, 7000))]
+          ("LFO (undo) brings it back", *heard(out / name, 5600, 7000))]
     results[name] = c
     # Quiet: SEL (SCL in the emulator) mutes the chosen instrument and unmutes it again.
     name = "quiet"
@@ -296,6 +296,68 @@ def kid_checks(emu, fwsc, out):
         changed = False
     c += [("ALGORITHM changes the picture", changed, "changed" if changed else "unchanged"),
           ("the new instrument plays", *heard(out / name, 3600, 4500))]
+    results[name] = c
+    # More instruments: PIANO, TRUMPET and BELLS share the DX7 engine but each
+    # gets its own voice; SOUND then moves to another trumpet-family voice.
+    name = "instruments"
+    tune = "3500:C4@100,4500:C4^"
+    runs = {}
+    for label, turns in (("piano", ""), ("trumpet", "2000:e1:2,"), ("bells", "2000:e1:6,"),
+                         ("trumpet-2", "2000:e1:2,2900:e4:1,")):
+        r, c1 = kid_run(emu, fwsc, out, f"{name}-{label}", 5000, turns + tune)
+        audio = out / f"{name}-{label}" / "frames" / "audio.raw"
+        seg = audio.read_bytes()[3500 * RATE // 1000 * 4:4500 * RATE // 1000 * 4] if audio.exists() else b""
+        try:
+            lcd = frame_lcd(out / f"{name}-{label}", 4400)[2]   # after the name notice
+        except (FileNotFoundError, IndexError):
+            lcd = None
+        runs[label] = (c1[0][1], seg, lcd)
+    c = [("emulator ran cleanly", all(v[0] for v in runs.values()), "4 runs")]
+    for label in ("piano", "trumpet", "bells"):
+        c.append((f"{label} plays", *heard(out / f"{name}-{label}", 3600, 4500)))
+    def differ(label, a, b):
+        sound, screen = runs[a][1] != runs[b][1], runs[a][2] != runs[b][2]
+        return (label, sound and screen, f"sound {'differs' if sound else 'same'}, screen {'differs' if screen else 'same'} vs {a}")
+    c += [differ("TRUMPET has its own picture and voice", "piano", "trumpet"),
+          differ("BELLS has its own picture and voice", "trumpet", "bells"),
+          differ("SOUND moves to another trumpet voice", "trumpet", "trumpet-2")]
+    results[name] = c
+    # BASS uses the DX7 bass voices; SOUND runs on through them to the 303.
+    name = "bass"
+    for label, turns in (("bass", "2000:e1:9,"), ("bass-303", "2000:e1:9,2900:e4:16,")):
+        r, c1 = kid_run(emu, fwsc, out, f"{name}-{label}", 5000, turns + tune)
+        audio = out / f"{name}-{label}" / "frames" / "audio.raw"
+        seg = audio.read_bytes()[3500 * RATE // 1000 * 4:4500 * RATE // 1000 * 4] if audio.exists() else b""
+        try:
+            lcd = frame_lcd(out / f"{name}-{label}", 4400)[2]
+        except (FileNotFoundError, IndexError):
+            lcd = None
+        runs[label] = (c1[0][1], seg, lcd)
+    c = [("emulator ran cleanly", runs["bass"][0] and runs["bass-303"][0], "2 runs"),
+         ("bass plays", *heard(out / f"{name}-bass", 3600, 4500)),
+         ("the 303 bass plays", *heard(out / f"{name}-bass-303", 3600, 4500)),
+         differ("BASS has its own picture and voice", "piano", "bass"),
+         differ("SOUND moves on to the 303 bass line", "bass", "bass-303")]
+    results[name] = c
+    # EDIT: the sound panel. REVERB and LONG keep a note ringing after the key is let go.
+    name = "sound-edit"
+    short = "3000:C4@100,3300:C4^"
+    tails = {}
+    for label, turns in (("dry", ""), ("reverb", "2000:EDIT,2100:EDIT^,2300:e2:15,"),
+                         ("reverb-room", "2000:EDIT,2100:EDIT^,2300:e2:15,2400:e5:40,"),
+                         ("long", "2000:EDIT,2100:EDIT^,2300:e4:30,")):
+        r, c1 = kid_run(emu, fwsc, out, f"{name}-{label}", 9000 if label == "long" else 4500, turns + short)
+        tails[label] = (c1[0][1], window_peak(out / f"{name}-{label}", 3400, 3800),
+                        window_peak(out / f"{name}-{label}", 3800, 4400))
+    def rings(label, run, w):
+        ok = tails[run][w] > 2 * tails["dry"][w] + 50
+        return (label, ok, f"peak {tails[run][w]} vs {tails['dry'][w]} dry, {'0.1-0.5' if w == 1 else '0.5-1.1'} s after the key")
+    c = [("emulator ran cleanly", all(v[0] for v in tails.values()), "4 runs"),
+         rings("REVERB rings on", "reverb", 1),
+         rings("ROOM makes the reverb longer", "reverb-room", 2),
+         rings("LONG rings on", "long", 2),
+         ("LONG turned all the way still lets the note end",
+          *heard(out / f"{name}-long", 8000, 9000, loud=False))]
     results[name] = c
     # Autosave: make a pattern, leave it alone, then power off and on: it is still there.
     name = "autosave"
@@ -368,7 +430,7 @@ def main():
     ap.add_argument("--reference")
     ap.add_argument("--reference-label", help="how to name the reference in the summary")
     ap.add_argument("--suite", choices=["generic", "kids"], default="generic",
-                    help="kids: also test FM1 Kids behaviours (start over, quiet, picker, autosave, arpeggiator, battery)")
+                    help="kids: also test FM1 Kids behaviours (start over, quiet, picker, instruments, sound edit, autosave, arpeggiator, battery)")
     a = ap.parse_args()
     out = pathlib.Path(a.out)
     results, digests = test(a.emu, a.fwsc, out / "build", a.suite)

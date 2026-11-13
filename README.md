@@ -19,7 +19,8 @@ sound engines.
 
 ## What it does
 
-- **Eight instruments as picture tiles:** piano, bass, game (chiptune), guitar,
+- **Eight tiles, 15 instruments with pictures:** piano, organ, trumpet, flute,
+  violin, choir, bells, xylophone, guitar, bass, robot, dream, game (chiptune),
   fun (samples) and drums. Turn SELECT to choose one and play the keys. On
   melodic instruments every key fits (a C major pentatonic scale), so nothing
   sounds wrong. Turn ALGORITHM to swap a tile's instrument.
@@ -28,9 +29,11 @@ sound engines.
   appears on the grid, and melody steps show their note by color and height.
 - **Arpeggiator (ARP):** tap for up, down, bounce or random; hold for "keep
   going"; hold and turn the knobs for speed, octaves, note length and swing.
-- **Four knobs:** LOUD, BRIGHT, SOUND (with the sound's name) and SPEED.
+- **Four knobs:** LOUD, BRIGHT, SOUND (other versions of the same instrument,
+  with the sound's name) and SPEED. Turning fast takes bigger steps.
+- **EDIT sound panel:** REVERB, ECHO, LONG (how long notes ring) and ROOM.
 - **Hard to lose work:** songs save themselves once left alone while stopped,
-  EDIT is undo, and starting over asks first.
+  LFO is undo, and starting over asks first.
 - **Kind to small ears and parents:** a volume cap, a battery gauge with a
   "charge me" warning, and a hidden parent panel (hold GLO) for Bluetooth MIDI
   keyboards. A keyboard on MIDI channel 1 plays the chosen instrument.
