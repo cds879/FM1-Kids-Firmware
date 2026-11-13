@@ -361,6 +361,21 @@ def kid_checks(emu, fwsc, out):
     print("GALLERY-PNG-BEGIN")
     print(base64.b64encode((out / "sparks-gallery.png").read_bytes()).decode())
     print("GALLERY-PNG-END")
+    # Play along: a tune from the ENV list; only the right key moves it on.
+    name = "learn"
+    r, c = kid_run(emu, fwsc, out, name, 6000, "2000:ENV,2100:ENV^,2300:e0:17,2600:PLAY,2700:PLAY^,"
+                   "4000:D4@100,4200:D4^,4500:C4@100,4700:C4^")
+
+    def foot(ms):
+        try:
+            return crop(read_ppm(out / name / "frames" / f"{ms // 100:06d}.ppm"), (LCD[0], LCD[1] + 380, 480, 100))[2]
+        except (FileNotFoundError, IndexError):
+            return None
+    c += [("the tune starts", foot(3900) is not None and foot(3900) != foot(2200), "play-along shown"),
+          ("a wrong key does not move it on", foot(3900) == foot(4400), "same next note"),
+          ("the right key moves it on", foot(4400) != foot(5200), "next note shown"),
+          ("the keys still play", *heard(out / name, 4500, 4900))]
+    results[name] = c
     # Quiet: SEL (SCL in the emulator) mutes the chosen instrument and unmutes it again.
     name = "quiet"
     r, c = kid_run(emu, fwsc, out, name, 6500, PATTERN + ",2200:PLAY,2300:PLAY^,3000:HOME,3100:HOME^,3200:SCL,3300:SCL^,4500:SCL,4600:SCL^")
@@ -526,7 +541,7 @@ def main():
     ap.add_argument("--reference")
     ap.add_argument("--reference-label", help="how to name the reference in the summary")
     ap.add_argument("--suite", choices=["generic", "kids"], default="generic",
-                    help="kids: also test FM1 Kids behaviours (start over, songs, keys, parts, sparks, quiet, picker, instruments, sound edit, autosave, arpeggiator, battery)")
+                    help="kids: also test FM1 Kids behaviours (start over, songs, learn, keys, parts, sparks, quiet, picker, instruments, sound edit, autosave, arpeggiator, battery)")
     a = ap.parse_args()
     out = pathlib.Path(a.out)
     results, digests = test(a.emu, a.fwsc, out / "build", a.suite)

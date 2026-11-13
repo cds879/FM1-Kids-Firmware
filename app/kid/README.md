@@ -31,7 +31,7 @@ The battery icon shows the stock firmware's three levels, a + while on USB
 power, and flashes red with CHARGE ME! when nearly empty (the song saves
 itself then too). A keyboard on MIDI channel 1 (USB, Bluetooth or the DIN
 jack) plays the chosen instrument; channels 2–16 keep their usual tracks.
-The firmware identifies itself as `FM-1_8100001` (FM1 Kids 0.6), still in
+The firmware identifies itself as `FM-1_8100001` (FM1 Kids 0.7), still in
 M-VAVE's open range, so the workbench can install other firmware over it.
 
 **For parents, hold GLO** to open the Bluetooth MIDI panel. By default a
@@ -122,3 +122,14 @@ ACID ALLEY, CHIP PARADE, ...). PLAY loads the chosen one and starts it.
 `KID_VERSION` in `kid_config.h` goes up with every pull request (0.2, 0.3,
 ...); the FM-1 shows it on the start screen ("FM1 KIDS 0.2"). CI fails a
 pull request that does not change it.
+
+## Play along
+
+After the demo songs, the ENV list has tunes to learn: TWINKLE, MARY LAMB,
+BIRTHDAY, ODE TO JOY, HOT BUNS, JINGLE, ROW BOAT and MACDONALD (old folk
+tunes, melody only). PLAY starts one: the key to press next lights up, the
+screen shows the next note in its colour and a bar shows how far along it is.
+Only the right key moves on; any key still plays. At the end it says YAY! and
+goes back to normal. HOME stops early. While playing along the keys use DO RE
+MI (every white key as printed) and chords are off; the earlier scale and
+chords come back afterwards.
