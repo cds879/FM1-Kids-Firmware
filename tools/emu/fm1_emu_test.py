@@ -338,6 +338,16 @@ def kid_checks(emu, fwsc, out):
          ("the 303 bass plays", *heard(out / f"{name}-bass-303", 3600, 4500)),
          differ("BASS has its own picture and voice", "piano", "bass"),
          differ("SOUND moves on to the 303 bass line", "bass", "bass-303")]
+    # The new project's own bass tile (track 2) must already be the kid BASS:
+    # choosing BASS for it again must not change its sound.
+    for label, turns in (("tile", "1500:e0:1,"), ("tile-picked", "1500:e0:1,2000:e1:15,")):
+        r, c1 = kid_run(emu, fwsc, out, f"{name}-{label}", 5000, turns + tune)
+        audio = out / f"{name}-{label}" / "frames" / "audio.raw"
+        runs[label] = (c1[0][1], audio.read_bytes()[3500 * RATE // 1000 * 4:4500 * RATE // 1000 * 4]
+                       if audio.exists() else b"", None)
+    c += [("the bass tile plays", *heard(out / f"{name}-tile", 3600, 4500)),
+          ("the bass tile is already the kid BASS", runs["tile"][1] == runs["tile-picked"][1] and runs["tile"][1] != b"",
+           "same sound as picking BASS again")]
     results[name] = c
     # EDIT: the sound panel. REVERB and LONG keep a note ringing after the key is let go.
     name = "sound-edit"
