@@ -344,9 +344,11 @@ def kid_checks(emu, fwsc, out):
     short = "3000:C4@100,3300:C4^"
     tails = {}
     for label, turns in (("dry", ""), ("reverb", "2000:EDIT,2100:EDIT^,2300:e2:15,"),
+                         ("reverb-room", "2000:EDIT,2100:EDIT^,2300:e2:15,2400:e5:40,"),
                          ("long", "2000:EDIT,2100:EDIT^,2300:e4:30,")):
         r, c1 = kid_run(emu, fwsc, out, f"{name}-{label}", 4500, turns + short)
         tails[label] = (c1[0][1], window_peak(out / f"{name}-{label}", 3700, 4300))
+        print(label, [window_peak(out / f"{name}-{label}", a, a + 200) for a in range(3000, 4500, 200)])
     c = [("emulator ran cleanly", all(v[0] for v in tails.values()), "3 runs"),
          ("REVERB rings on", tails["reverb"][1] > 2 * tails["dry"][1] + 50,
           f"tail peak {tails['reverb'][1]} vs {tails['dry'][1]} dry"),
