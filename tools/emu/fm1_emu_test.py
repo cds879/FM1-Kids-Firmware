@@ -346,14 +346,18 @@ def kid_checks(emu, fwsc, out):
     for label, turns in (("dry", ""), ("reverb", "2000:EDIT,2100:EDIT^,2300:e2:15,"),
                          ("reverb-room", "2000:EDIT,2100:EDIT^,2300:e2:15,2400:e5:40,"),
                          ("long", "2000:EDIT,2100:EDIT^,2300:e4:30,")):
-        r, c1 = kid_run(emu, fwsc, out, f"{name}-{label}", 4500, turns + short)
-        tails[label] = (c1[0][1], window_peak(out / f"{name}-{label}", 3700, 4300))
-        print(label, [window_peak(out / f"{name}-{label}", a, a + 200) for a in range(3000, 4500, 200)])
-    c = [("emulator ran cleanly", all(v[0] for v in tails.values()), "3 runs"),
-         ("REVERB rings on", tails["reverb"][1] > 2 * tails["dry"][1] + 50,
-          f"tail peak {tails['reverb'][1]} vs {tails['dry'][1]} dry"),
-         ("LONG rings on", tails["long"][1] > 2 * tails["dry"][1] + 50,
-          f"tail peak {tails['long'][1]} vs {tails['dry'][1]} dry")]
+        r, c1 = kid_run(emu, fwsc, out, f"{name}-{label}", 9000 if label == "long" else 4500, turns + short)
+        tails[label] = (c1[0][1], window_peak(out / f"{name}-{label}", 3400, 3800),
+                        window_peak(out / f"{name}-{label}", 3800, 4400))
+    def rings(label, run, w):
+        ok = tails[run][w] > 2 * tails["dry"][w] + 50
+        return (label, ok, f"peak {tails[run][w]} vs {tails['dry'][w]} dry, {'0.1-0.5' if w == 1 else '0.5-1.1'} s after the key")
+    c = [("emulator ran cleanly", all(v[0] for v in tails.values()), "4 runs"),
+         rings("REVERB rings on", "reverb", 1),
+         rings("ROOM makes the reverb longer", "reverb-room", 2),
+         rings("LONG rings on", "long", 2),
+         ("LONG turned all the way still lets the note end",
+          *heard(out / f"{name}-long", 8000, 9000, loud=False))]
     results[name] = c
     # Autosave: make a pattern, leave it alone, then power off and on: it is still there.
     name = "autosave"

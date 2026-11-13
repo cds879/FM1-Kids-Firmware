@@ -374,6 +374,7 @@ static void bright_edit(int delta)
 }
 /* LONG: how long notes ring after the key is let go. DX7: every operator's
  * release rate; other engines: their release/decay/length setting. */
+enum { LONG_SLOWEST = 30 };   /* DX7 release rate: about a few seconds at most */
 static int long_target(unsigned t, struct bright *b)
 {
     b->fm = kind(t) == GROOVE_DX7;
@@ -396,8 +397,11 @@ static int long_value(unsigned t)   /* 0..100, or -1 when the engine has none */
         uint8_t patch[156];
         if (groove_fm_copy(t, patch, NULL)) return -1;
         unsigned sum = 0;
-        for (unsigned op = 0; op < 6; ++op) sum += patch[op * 21U + 3U] > 99 ? 99U : patch[op * 21U + 3U];
-        return (int)((99U * 6U - sum) * 100U / (99U * 6U));
+        for (unsigned op = 0; op < 6; ++op) {
+            unsigned r = patch[op * 21U + 3U];
+            sum += r > 99 ? 99U : r < LONG_SLOWEST ? LONG_SLOWEST : r;
+        }
+        return (int)((99U * 6U - sum) * 100U / ((99U - LONG_SLOWEST) * 6U));
     }
     uint8_t v[GROOVE_TONE_PARAMS];
     return groove_tone_copy(t, b.part, v) <= (int)b.param ? -1 : (int)v[b.param] * 100 / (int)b.max;
@@ -406,8 +410,14 @@ static void long_edit(int delta)
 {
     struct bright b;
     if (!long_target(track, &b)) return;
-    if (b.fm) for (unsigned op = 0; op < 6; ++op) groove_fm_edit(track, op * 21U + 3U, -delta);  /* slower = longer */
-    else groove_tone_edit(track, b.part, b.param, delta);
+    if (!b.fm) { groove_tone_edit(track, b.part, b.param, delta); return; }
+    uint8_t patch[156];
+    if (groove_fm_copy(track, patch, NULL)) return;
+    for (unsigned op = 0; op < 6; ++op) {          /* a slower release rate rings longer */
+        int r = patch[op * 21U + 3U] > 99 ? 99 : patch[op * 21U + 3U];
+        int next = clampi(r - delta, r < LONG_SLOWEST ? r : LONG_SLOWEST, 99);  /* never a note that never ends */
+        if (next != r) groove_fm_edit(track, op * 21U + 3U, next - r);
+    }
 }
 /* Knob acceleration (as in M-VAVE's UI): a fast turn in one direction grows
  * the step up to 4x; a pause or a change of direction is fine again. */
