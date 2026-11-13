@@ -379,17 +379,18 @@ def kid_checks(emu, fwsc, out):
     # Play along: a tune from the ENV list; only the right key moves it on.
     name = "learn"
     r, c = kid_run(emu, fwsc, out, name, 6000, "2000:ENV,2100:ENV^,2300:e0:17,2600:PLAY,2700:PLAY^,"
-                   "4000:D4@100,4200:D4^,4500:C4@100,4700:C4^")
+                   "4500:D4@100,4600:D4^,5000:C4@100,5100:C4^")
 
     def foot(ms):
         try:
             return crop(read_ppm(out / name / "frames" / f"{ms // 100:06d}.ppm"), (LCD[0], LCD[1] + 380, 480, 100))[2]
         except (FileNotFoundError, IndexError):
             return None
-    c += [("the tune starts", foot(3900) is not None and foot(3900) != foot(2200), "play-along shown"),
-          ("a wrong key does not move it on", foot(3900) == foot(4400), "same next note"),
-          ("the right key moves it on", foot(4400) != foot(5200), "next note shown"),
-          ("the keys still play", *heard(out / name, 4500, 4900))]
+    # (the tune's name shows over the panel until about 4.1 s)
+    c += [("the tune starts", foot(4400) is not None and foot(4400) != foot(2200), "play-along shown"),
+          ("a wrong key does not move it on", foot(4400) == foot(4900), "same next note"),
+          ("the right key moves it on", foot(4900) != foot(5500), "next note shown"),
+          ("the keys still play", *heard(out / name, 5000, 5400))]
     results[name] = c
     # Quiet: SEL (SCL in the emulator) mutes the chosen instrument and unmutes it again.
     name = "quiet"
