@@ -394,11 +394,11 @@ def kid_checks(emu, fwsc, out):
     results[name] = c
     # Help: holding HOME shows the buttons for the page you are on; letting go goes back.
     name = "help"
-    r, c = kid_run(emu, fwsc, out, name, 8000, "2000:HOME,3500:HOME^,4500:SEQ,4600:SEQ^,5500:HOME,7000:HOME^")
+    r, c = kid_run(emu, fwsc, out, name, 10000, "3000:HOME,4500:HOME^,5500:SEQ,5600:SEQ^,7000:HOME,8500:HOME^")
     try:
-        before, play_help, after = (frame_lcd(out / name, ms)[2] for ms in (1900, 3000, 4300))
-        beat, beat_help = frame_lcd(out / name, 5400)[2], frame_lcd(out / name, 6500)[2]
-        home_again = frame_lcd(out / name, 7800)[2]
+        before, play_help, after = (frame_lcd(out / name, ms)[2] for ms in (2900, 4000, 5300))
+        beat, beat_help = frame_lcd(out / name, 6900)[2], frame_lcd(out / name, 8000)[2]
+        home_again = frame_lcd(out / name, 9500)[2]
     except (FileNotFoundError, IndexError):
         before = play_help = after = beat = beat_help = home_again = None
     c += [("holding HOME shows help", play_help is not None and play_help != before, "screen changed"),
@@ -408,7 +408,7 @@ def kid_checks(emu, fwsc, out):
     results[name] = c
     try:                                   # both help pages side by side, for looking at (also in the log)
         cells = [crop(read_ppm(out / name / "frames" / f"{ms // 100:06d}.ppm"), (LCD[0], LCD[1], 480, 480))
-                 for ms in (3000, 6500)]
+                 for ms in (4000, 8000)]
         px = b"".join(b"".join(cell[2][r * 1440:(r + 1) * 1440] for cell in cells) for r in range(480))
         write_png(out / "help-pages.png", (960, 480, px))
         import base64
