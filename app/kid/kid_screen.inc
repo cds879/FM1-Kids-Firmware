@@ -27,7 +27,8 @@
  *   EDIT             sound panel: K1..K4 = REVERB, ECHO, LONG (how long notes
  *                    ring), ROOM (reverb size, shared); EDIT again: KEYS,
  *                    K1 SCALE (HAPPY, SAD, DO RE MI, SPOOKY, DREAMY, ALL KEYS),
- *                    K2 CHORDS (one key plays a chord); EDIT again closes
+ *                    K2 CHORDS (one key plays a chord), K3 SILLY (WOBBLE,
+ *                    BOING, ZOOM, SIREN bend held notes); EDIT again closes
  *   ENV              songs: turn SELECT to choose MY SONG or one of 16 demo
  *                    songs, PLAY loads it (sounds and patterns) and plays;
  *                    a demo's changes are kept in the last project slot
@@ -74,6 +75,11 @@ static const struct { const char *name; uint16_t notes, parent; } scales[SCALES]
     {"DREAMY",   0x555, 0x555},   /* whole tone */
     {"ALL KEYS", 0xfff, 0xab5}};  /* every key as it is; chords from C major */
 static unsigned scale, chords;     /* EDIT page 2: the keys' scale, one-key chords */
+/* SILLY (EDIT page 2, K3): bends the pitch while keys are held. */
+enum { SILLY_OFF, SILLY_WOBBLE, SILLY_BOING, SILLY_ZOOM, SILLY_SIREN, SILLIES };
+static const char *const silly_names[SILLIES] = {"OFF", "WOBBLE", "BOING", "ZOOM", "SIREN"};
+static unsigned silly, bend_sent = 8192, bend_channel;
+static uint32_t bend_at;
 /* Kid instruments: what the picker offers and the tiles show. Several use the
  * DX7 engine with a chosen factory voice; the others are whole engines. */
 enum { I_PIANO, I_ORGAN, I_TRUMPET, I_FLUTE, I_VIOLIN, I_CHOIR, I_BELLS, I_XYLO,
@@ -657,7 +663,7 @@ static uint32_t signature(unsigned e)
         if (songs_panel)
             return 0x70000000U | song_pick << 8 | current_song() << 16 | playing;
         if (learn) return 0x68000000U | learn << 16 | learn_pos << 4 | (learn_done_at != 0);
-        if (sound_panel == 2) return 0x58000000U | scale << 4 | chords;
+        if (sound_panel == 2) return 0x58000000U | scale << 4 | chords | silly << 8;
         if (sound_panel) {
             int v[4];
             sound_values(v);
@@ -790,10 +796,12 @@ static void draw_keys(void)
 {
     text(4, 193, "KEYS", 1, kid_colors[2]);
     text(150, 193, "EDIT: DONE", 1, OFF4);
-    text_center(0, 120, 205, "SCALE", 1, SOFT);
-    text_center(0, 120, 217, scales[scale].name, 2, kid_colors[scale]);
-    text_center(120, 120, 205, "CHORDS", 1, SOFT);
-    text_center(120, 120, 217, chords ? "ON" : "OFF", 2, chords ? GO : OFF4);
+    text_center(0, 80, 205, "SCALE", 1, SOFT);
+    text_center(0, 80, 217, scales[scale].name, strlen(scales[scale].name) > 6 ? 1 : 2, kid_colors[scale]);
+    text_center(80, 80, 205, "CHORDS", 1, SOFT);
+    text_center(80, 80, 217, chords ? "ON" : "OFF", 2, chords ? GO : OFF4);
+    text_center(160, 80, 205, "SILLY", 1, SOFT);
+    text_center(160, 80, 217, silly_names[silly], 2, silly ? kid_colors[5] : OFF4);
 }
 static void draw_foot(void)
 {
@@ -1185,6 +1193,36 @@ static void draw_learn(void)
         text(110 + k * 22U, 218, names[tunes[learn - 1U].notes[learn_pos + k] % 12U], 1, OFF4);
 }
 
+/* SILLY: a triangle wave, -1000..1000, period p ms. */
+static int tri(uint32_t t, uint32_t p)
+{
+    int ph = (int)(t % p) * 4000 / (int)p;            /* 0..3999 */
+    return ph < 1000 ? ph : ph < 3000 ? 2000 - ph : ph - 4000;
+}
+static void silly_tick(uint32_t now)
+{
+    unsigned held = 0;
+    for (unsigned k = 0; k < 27; ++k) held |= key_note[k] != 0xff && key_track[k] == track;
+    unsigned want = 8192, ch = groove_midi_input_channel(track);
+    if (silly && held && !drum_track(track)) {
+        int t = (int)(now - bend_at), v = 0;
+        switch (silly) {
+        case SILLY_WOBBLE: v = tri((uint32_t)t, 160) * 2; break;                         /* vibrato */
+        case SILLY_BOING:  v = t < 250 ? -6000 * (250 - t) / 250 : tri((uint32_t)t, 120) * 3 / 5; break;
+        case SILLY_ZOOM:   v = t < 700 ? -8000 * t / 700 : -8000; break;                 /* falls away */
+        default:           v = tri((uint32_t)t, 900) * 4; break;                          /* siren */
+        }
+        want = (unsigned)clampi(8192 + v, 0, 16383);
+    }
+    if (bend_channel != ch && bend_sent != 8192) {      /* the instrument changed: straighten the old one */
+        if (!post((uint8_t)(0xe0 | bend_channel), 0, 64, 3)) return;
+        bend_sent = 8192;
+    }
+    bend_channel = ch;
+    if (want / 64U == bend_sent / 64U) return;
+    if (post((uint8_t)(0xe0 | ch), (uint8_t)(want & 127U), (uint8_t)(want >> 7), 3)) bend_sent = want;
+}
+
 /* A new part: every track's previous part copied in, ready to change. */
 static void add_part(unsigned p)
 {
@@ -1208,6 +1246,7 @@ void groove_screen_init(void)
     songs_panel = song_pick = 0;
     scale = chords = 0;
     learn = learn_pos = 0; learn_key = 0xff; learn_done_at = 0;
+    silly = 0; bend_sent = 8192; bend_channel = 0;
     part = 0; song_parts = 1; part_at = 0;
     memset(knob_dir, 0, sizeof knob_dir); memset(knob_speed, 0, sizeof knob_speed); memset(knob_at, 0, sizeof knob_at);
     arp_down_at = 0; arp_long = arp_turned = arp_panel = 0;
@@ -1300,6 +1339,7 @@ void groove_screen_control(void)
     } else if (sound_panel == 2) {                     /* EDIT twice: the keys */
         if (c.encoders[2]) { release_keys(); scale = (unsigned)((int)(scale + SCALES) + c.encoders[2] % SCALES) % SCALES; }
         if (c.encoders[3]) { release_keys(); chords = c.encoders[3] > 0; }
+        if (c.encoders[4]) silly = (unsigned)clampi((int)silly + c.encoders[4], 0, SILLIES - 1);
     } else if (sound_panel) {                          /* EDIT: the sound panel */
         if (c.encoders[2]) groove_sends_edit(track, 0, c.encoders[2]);
         if (c.encoders[3]) groove_sends_edit(track, 1, c.encoders[3]);
@@ -1465,6 +1505,7 @@ void groove_screen_control(void)
             key_note[key] = (uint8_t)note;
             key_track[key] = (uint8_t)track;
             if (!drum_track(track)) beat_note = note;
+            bend_at = now;
             if (learn && !learn_done_at && note == learn_note()) {   /* the right key: on to the next */
                 ++learn_pos;
                 if (learn_pos >= sizeof tunes[0].notes || !learn_note()) learn_done_at = now | 1U;
@@ -1494,6 +1535,7 @@ void groove_screen_control(void)
         if (learn_done_at && since(now, learn_done_at) > 4000) learn_stop();
         else learn_find_key();                             /* follows octave and instrument changes */
     }
+    silly_tick(now);
     if (tidy_pending) tidy_tracks(now);
     autosave(now);
     previous_buttons = c.buttons;
