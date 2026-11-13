@@ -241,6 +241,22 @@ def window_peak(work, start_ms, end_ms):
     return max((abs(v) for v in seg), default=0)
 
 
+def onsets(work, start_ms, end_ms):
+    """Separate note starts: the 10 ms loudness jumps well above where it was 20 ms before."""
+    path = work / "frames" / "audio.raw"
+    s = samples(path.read_bytes()) if path.exists() else ()
+    step = RATE // 100
+    env = []
+    for i in range(start_ms * RATE // 1000, end_ms * RATE // 1000 - step, step):
+        seg = s[i * 2:(i + step) * 2:2]
+        env.append((sum(v * v for v in seg) / max(1, len(seg))) ** 0.5)
+    count, last = 0, -10
+    for i in range(2, len(env)):
+        if env[i] > 300 and env[i] > 1.8 * env[i - 2] and i - last >= 5:
+            count, last = count + 1, i
+    return count
+
+
 def kid_run(emu, fwsc, out, name, ms, keys, flash=None):
     r = run(emu, fwsc, ms, keys, out / name, flash=flash, frames=True)
     if r["lcd"]:
@@ -264,12 +280,12 @@ def kid_checks(emu, fwsc, out):
           ("FX twice clears it", *heard(out / name, 4200, 4900, loud=False)),
           ("EDIT brings it back", *heard(out / name, 5600, 7000))]
     results[name] = c
-    # Quiet: ARP mutes the chosen instrument and unmutes it again.
+    # Quiet: SEL (SCL in the emulator) mutes the chosen instrument and unmutes it again.
     name = "quiet"
-    r, c = kid_run(emu, fwsc, out, name, 6500, PATTERN + ",2200:PLAY,2300:PLAY^,3000:HOME,3100:HOME^,3200:ARP,3300:ARP^,4500:ARP,4600:ARP^")
+    r, c = kid_run(emu, fwsc, out, name, 6500, PATTERN + ",2200:PLAY,2300:PLAY^,3000:HOME,3100:HOME^,3200:SCL,3300:SCL^,4500:SCL,4600:SCL^")
     c += [("loop plays", *heard(out / name, 2600, 3100)),
-          ("ARP makes it quiet", *heard(out / name, 3900, 4500, loud=False)),
-          ("ARP again brings it back", *heard(out / name, 5000, 6500))]
+          ("SEL makes it quiet", *heard(out / name, 3900, 4500, loud=False)),
+          ("SEL again brings it back", *heard(out / name, 5000, 6500))]
     results[name] = c
     # Instrument picker: ALGORITHM changes the tile, and the new instrument plays.
     name = "picker"
@@ -292,6 +308,28 @@ def kid_checks(emu, fwsc, out):
     c += [("emulator ran cleanly after reboot", *c2[0][1:]),
           ("the pattern survives a reboot without SAVE", *heard(out / (name + "-reboot"), 2600, 4500))]
     c[-1] = (c[-1][0], c[-1][1], c[-1][2] + f"; {m.group(1) if m else 0} flash writes before")
+    results[name] = c
+    # Arpeggiator: tap ARP, hold one key: it plays repeated notes.
+    name = "arp"
+    r, c = kid_run(emu, fwsc, out, name, 4000, "1500:ARP,1600:ARP^,2000:C4@100,3600:C4^")
+    n_arp = onsets(out / name, 1950, 3650)
+    c += [("one held key plays several notes", n_arp >= 3, f"{n_arp} notes in 1.7 s")]
+    results[name] = c
+    # Timing: hold ARP and turn K1 (FAST): 1/16 plays clearly more notes than 1/4.
+    name = "arp-timing"
+    counts = {}
+    for label, turns in (("slow", "1400:e2:-3"), ("fast", "1400:e2:-3,1500:e2:2")):
+        r, c = kid_run(emu, fwsc, out, f"{name}-{label}", 4000,
+                       f"1000:ARP,1100:ARP^,1300:ARP,{turns},1700:ARP^,2000:C4@100,3600:C4^")
+        counts[label] = onsets(out / f"{name}-{label}", 1950, 3650)
+    c += [("FAST 1/16 plays more notes than 1/4", counts["fast"] >= counts["slow"] + 3,
+           f"1/4: {counts['slow']} notes, 1/16: {counts['fast']} notes")]
+    results[name] = c
+    # Latch: hold ARP (about a second) turns HOLD on; the notes carry on after the key is let go.
+    name = "arp-latch"
+    r, c = kid_run(emu, fwsc, out, name, 5000, "1000:ARP,2000:ARP^,2500:C4@100,2700:C4^")
+    n_latch = onsets(out / name, 3000, 5000)
+    c += [("notes keep going after the key is let go", n_latch >= 3, f"{n_latch} notes in 2 s after release")]
     results[name] = c
     # Battery: a low reading turns the battery icon red.
     name = "battery"
@@ -330,7 +368,7 @@ def main():
     ap.add_argument("--reference")
     ap.add_argument("--reference-label", help="how to name the reference in the summary")
     ap.add_argument("--suite", choices=["generic", "kids"], default="generic",
-                    help="kids: also test FM1 Kids behaviours (start over, quiet, picker, autosave, battery)")
+                    help="kids: also test FM1 Kids behaviours (start over, quiet, picker, autosave, arpeggiator, battery)")
     a = ap.parse_args()
     out = pathlib.Path(a.out)
     results, digests = test(a.emu, a.fwsc, out / "build", a.suite)

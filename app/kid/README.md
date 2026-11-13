@@ -16,7 +16,8 @@ M-VAVE's, unchanged.
 | **PLAY** | Start / stop |
 | **REC** | Record what you play into the loop |
 | **KNOB 1–4** | LOUD, BRIGHT (each engine's brightness), SOUND (shows the sound's name), SPEED |
-| **ARP** | Quiet / unquiet the chosen instrument |
+| **ARP** | Arpeggiator. Tap: UP, DOWN, BOUNCE (up and down), RANDOM, OFF. Hold about a second: HOLD (notes keep going after the keys are let go). Hold and turn KNOB 1–4: FAST (1/4, 1/8, 1/16, 1/32 of a beat), OCTAVES (1–4), LENGTH (25–100%), SWING (0–50%). It follows SPEED. On drums it repeats the drum |
+| **SEL** | Quiet / unquiet the chosen instrument |
 | **EDIT** | Undo |
 | **SAVE** | Save now. The song also saves by itself once it has been left alone for a few seconds while stopped |
 | **FX**, then **FX** | Start the chosen instrument over (EDIT brings it back) |
