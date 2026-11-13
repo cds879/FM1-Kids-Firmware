@@ -11,7 +11,9 @@
  *                    guitar, bass, robot, dream, game, fun, drums)
  *   piano keys       play it; melodic tracks snap to the scale (HAPPY to start)
  *   SEQ              BEAT mode: white keys switch steps on/off,
- *                    black keys pick the drum (or note) to place
+ *                    black keys pick the drum (or note) to place; ALGORITHM picks the
+ *                    song part (A-D) to show, a new part starts as a copy of
+ *                    the one before, and the song plays its parts in turn
  *   HOME             back to PLAY mode
  *   PLAY             start / stop      REC   record what you play
  *   K1..K4           LOUD, BRIGHT, SOUND, SPEED; turn fast for big steps.
@@ -133,6 +135,11 @@ static const uint8_t punctuation[][6] = {{'!', 0, 0, 0x5f, 0, 0}, {'-', 8, 8, 8,
 /* ---------- state ---------- */
 static unsigned track, mode, drum, recording, playing, play_step, retry_reset;
 static unsigned beat_note = 60;
+/* Song parts: each part is one row of steps; the song plays A, B, C, D in turn.
+ * BEAT shows and edits one part; ALGORITHM chooses it. */
+enum { PARTS = 4 };
+static unsigned part, song_parts = 1;
+static uint32_t part_at;
 static int octave;
 static uint32_t previous_buttons, previous_keys, notice_until, confirm_until;
 static uint32_t booted_at, input_at, save_tried_at, warned_at, picked_at;
@@ -358,6 +365,7 @@ static unsigned step_on(unsigned t, unsigned step)
 }
 static void toggle_step(unsigned step)
 {
+    step += part * KID_STEPS;
     unsigned on = step_on(track, step);
     unsigned note = drum_track(track) ? groove_pad_note(track, drum) : beat_note;
     uint8_t notes[3];
@@ -620,11 +628,14 @@ static uint32_t signature(unsigned e)
                (uint32_t)(picking && i == track) << 7 | groove_arp_enabled(i) << 8 | groove_arp_setting(i, 5) << 9 |
                shown_kind(i) << 10;
     }
-    if (i == 16) return base | drum << 4 | beat_note << 8 | look(track) << 16;
+    if (i == 16)
+        return mix(base | drum << 4 | beat_note << 8 | look(track) << 16,
+                   part | song_parts << 2 | (playing ? play_step / KID_STEPS + 1U : 0) << 5);
+    i += part * KID_STEPS;
     struct groove_view v;
     groove_get_view(track, i, &v);
     uint32_t s = mix(mix(mix(base, v.step.drums), v.step.velocity ? v.step.note + 1U : 0), drum);
-    return mix(s, playing && play_step == i) | 1U;
+    return mix(mix(s, playing && play_step == i), part) | 1U;
 }
 static void draw_battery(void)
 {
@@ -794,7 +805,16 @@ static void draw_pick(void)
         name = tune;
     }
     text(44, 50, name, 3, c);
-    text(44, 73, "BLACK KEYS: PICK  WHITE: STEPS", 1, OFF4);
+    /* The song's parts: the one shown is framed, the one playing has a dot. */
+    for (unsigned p = 0; p < PARTS; ++p) {
+        unsigned x = 152U + p * 22U, used = p < song_parts;
+        char letter[2] = {(char)('A' + p), 0};
+        fill(x, 70, 18, 11, used ? kid_colors[track] : OFF);
+        if (p == part) frame(x - 2, 68, 22, 15, 2, INK);
+        text(x + 6, 72, letter, 1, used ? BG : OFF4);
+        if (playing && play_step / KID_STEPS == p) fill(x + 14, 72, 3, 3, INK);
+    }
+    text(44, 73, "PART", 1, OFF4);
 }
 /* Melody notes take the colour of their pitch and sit higher when higher. */
 static const uint16_t note_colors[12] = {RGB(255, 80, 80), RGB(255, 80, 80), RGB(255, 160, 40), RGB(255, 160, 40),
@@ -802,6 +822,7 @@ static const uint16_t note_colors[12] = {RGB(255, 80, 80), RGB(255, 80, 80), RGB
                                          RGB(40, 200, 220), RGB(70, 120, 255), RGB(70, 120, 255), RGB(170, 90, 240)};
 static void draw_cell(unsigned i, unsigned x, unsigned y, unsigned w, unsigned h)
 {
+    i += part * KID_STEPS;
     struct groove_view v;
     groove_get_view(track, i, &v);
     uint16_t off = i % 4U ? OFF : OFF4;
@@ -865,7 +886,8 @@ static void leds(void)
     uint32_t keys = 0, buttons = 0;
     if (mode == KID_BEAT) {
         for (unsigned i = 0; i < 16; ++i)
-            if (step_on(track, i) ^ (playing && play_step == i)) keys |= 1U << white_keys[i];
+            if (step_on(track, part * KID_STEPS + i) ^ (playing && play_step == part * KID_STEPS + i))
+                keys |= 1U << white_keys[i];
         if (drum_track(track) && drum < 11) keys |= 1U << black_keys[drum];
     } else keys = previous_keys;
     buttons |= playing ? BUTTON(PLAY) : 0;
@@ -955,6 +977,16 @@ static void draw_songs(void)
     text_center(0, 240, 225, song_pick == current_song() ? "PLAY = PLAY   ENV = DONE" : "PLAY = LOAD AND PLAY", 1, OFF4);
 }
 
+/* A new part: every track's previous part copied in, ready to change. */
+static void add_part(unsigned p)
+{
+    if (!p || p >= PARTS) return;
+    for (unsigned t = 0; t < GROOVE_TRACKS; ++t) {
+        groove_sequence_length_set(t, (p + 1U) * KID_STEPS);
+        if (!groove_edit_copy(t, (p - 1U) * KID_STEPS, 1)) (void)groove_edit_paste(t, p * KID_STEPS, 1);
+    }
+}
+
 /* ---------- entry points ---------- */
 void groove_screen_init(void)
 {
@@ -967,6 +999,7 @@ void groove_screen_init(void)
     tidy_pending = 1;
     songs_panel = song_pick = 0;
     scale = chords = 0;
+    part = 0; song_parts = 1; part_at = 0;
     memset(knob_dir, 0, sizeof knob_dir); memset(knob_speed, 0, sizeof knob_speed); memset(knob_at, 0, sizeof knob_at);
     arp_down_at = 0; arp_long = arp_turned = arp_panel = 0;
     battery_avg = 0; battery_level = 3; on_usb = blink = 0;
@@ -1014,13 +1047,16 @@ void groove_screen_control(void)
     }
     battery_poll(c.battery, now);
     /* Every track loops one row of keys. */
-    /* Every track loops one row of keys, except longer loops a demo song brings. */
+    /* The song is as long as its last part with steps in it, on every track. */
+    song_parts = 1;
+    for (unsigned t = 0; t < GROOVE_TRACKS; ++t) {
+        struct groove_view v;
+        groove_get_view(t, 0, &v);
+        for (unsigned p = PARTS; p > song_parts; --p)
+            if ((v.active_steps >> ((p - 1U) * KID_STEPS)) & 0xffffU) { song_parts = p; break; }
+    }
     for (unsigned t = 0; t < GROOVE_TRACKS; ++t)
-        if (groove_sequence_length(t) != KID_STEPS) {
-            struct groove_view v;
-            groove_get_view(t, 0, &v);
-            if (!(v.active_steps >> KID_STEPS)) groove_sequence_length_set(t, KID_STEPS);
-        }
+        if (groove_sequence_length(t) != song_parts * KID_STEPS) groove_sequence_length_set(t, song_parts * KID_STEPS);
 
     fm1_ble_get_status(&ble);
     parent = (c.buttons & BUTTON(GLO)) != 0;
@@ -1065,8 +1101,19 @@ void groove_screen_control(void)
         if (c.encoders[4]) next_voice(c.encoders[4]);
         if (c.encoders[5]) groove_tempo_edit(fast(&c, 5));
     }
-    if (!songs_panel && mode == KID_BEAT && (c.encoders[1] || c.encoders[6]) && drum_track(track))
-        drum = (unsigned)clampi((int)drum + c.encoders[1] + c.encoders[6], 0, (int)groove_pad_count(track) - 1);
+    if (!songs_panel && mode == KID_BEAT && c.encoders[6] && drum_track(track))
+        drum = (unsigned)clampi((int)drum + c.encoders[6], 0, (int)groove_pad_count(track) - 1);
+    /* ALGORITHM in BEAT: choose the part. A new part starts as a copy of the one before. */
+    if (!songs_panel && mode == KID_BEAT && c.encoders[1]) {
+        unsigned was = part;
+        part = (unsigned)clampi((int)part + c.encoders[1], 0, PARTS - 1);
+        part_at = now | 1U;
+        if (part > was && part >= song_parts && part == song_parts) add_part(part);
+        if (part != was) {
+            static const char *const names[PARTS] = {"PART A", "PART B", "PART C", "PART D"};
+            say(names[part], kid_colors[track], now);
+        }
+    }
     /* ALGORITHM in PLAY: turn to choose a new instrument; it changes once the knob rests. */
     if (!songs_panel && mode == KID_PLAY && c.encoders[1]) {
         if (!picking) pick_kind = look(track);
@@ -1086,6 +1133,11 @@ void groove_screen_control(void)
     groove_get_view(track, 0, &view);
     playing = view.playing;
     play_step = view.play_step;
+    /* While playing, BEAT follows the part being played unless a part was just chosen. */
+    if (playing && mode == KID_BEAT && song_parts > 1 && (!part_at || since(now, part_at) > 4000)) {
+        part_at = 0;
+        part = play_step / KID_STEPS < song_parts ? play_step / KID_STEPS : part;
+    }
     recording = groove_edit_recording();
     keyboard_channel = groove_midi_input_channel(track);
     unsigned old_mode = mode;
