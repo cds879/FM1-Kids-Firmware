@@ -132,6 +132,7 @@ static unsigned ble_pick, parent;  /* parent: GLO held, the Bluetooth panel is o
 static int ble_result;
 static unsigned battery_avg, battery_level, on_usb, blink;   /* level 0..3 */
 static unsigned pick_kind, picking;   /* ALGORITHM: the instrument being chosen */
+static unsigned tidy_pending;         /* boot: give empty tracks their kid sound */
 static unsigned sound_panel;          /* EDIT: REVERB, ECHO, LONG and ROOM on K1..K4 */
 static int8_t knob_dir[7];            /* knob acceleration: turning fast takes bigger steps */
 static uint8_t knob_speed[7];
@@ -808,6 +809,26 @@ static void leds(void)
     led_keys = keys; led_buttons = buttons;
 }
 
+/* At boot, an empty track on the 303 shows BASS but is the acid bass line;
+ * give it the kid BASS sound (DX7 BASS 1) so the tile and the sound agree. A
+ * track with notes keeps its sound, and SOUND can still reach the 303. */
+static void tidy_tracks(uint32_t now)
+{
+    unsigned keep = track;
+    for (unsigned t = 0; t < GROOVE_TRACKS; ++t) {
+        struct groove_view v;
+        groove_get_view(t, 0, &v);
+        if (!v.ready && now < 4000U) return;           /* try again once the project is in */
+    }
+    for (track = 0; track < GROOVE_TRACKS; ++track) {
+        struct groove_view v;
+        groove_get_view(track, 0, &v);
+        if (v.ready && v.type == GROOVE_303 && !v.active_steps) set_look(I_BASS);
+    }
+    track = keep;
+    tidy_pending = 0;
+}
+
 /* ---------- entry points ---------- */
 void groove_screen_init(void)
 {
@@ -817,6 +838,7 @@ void groove_screen_init(void)
     input_at = save_tried_at = warned_at = picked_at = 0;
     picking = pick_kind = 0;
     sound_panel = 0;
+    tidy_pending = 1;
     memset(knob_dir, 0, sizeof knob_dir); memset(knob_speed, 0, sizeof knob_speed); memset(knob_at, 0, sizeof knob_at);
     arp_down_at = 0; arp_long = arp_turned = arp_panel = 0;
     battery_avg = 0; battery_level = 3; on_usb = blink = 0;
@@ -1024,6 +1046,7 @@ void groove_screen_control(void)
             if (!drum_track(track)) beat_note = note;
         }
     }
+    if (tidy_pending) tidy_tracks(now);
     autosave(now);
     previous_buttons = c.buttons;
     previous_keys = c.keys;

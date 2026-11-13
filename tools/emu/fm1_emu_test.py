@@ -338,6 +338,21 @@ def kid_checks(emu, fwsc, out):
          ("the 303 bass plays", *heard(out / f"{name}-bass-303", 3600, 4500)),
          differ("BASS has its own picture and voice", "piano", "bass"),
          differ("SOUND moves on to the 303 bass line", "bass", "bass-303")]
+    # The new project's own bass tile (track 2) must already be the kid BASS:
+    # choosing BASS for it again must not change its sound.
+    for label, turns in (("tile", "1500:e0:1,"), ("tile-picked", "1500:e0:1,2000:e1:15,")):
+        r, c1 = kid_run(emu, fwsc, out, f"{name}-{label}", 5000, turns + tune)
+        audio = out / f"{name}-{label}" / "frames" / "audio.raw"
+        runs[label] = (c1[0][1], audio.read_bytes()[3500 * RATE // 1000 * 4:4500 * RATE // 1000 * 4]
+                       if audio.exists() else b"", None)
+    def crossings(raw):                       # zero crossings of the left channel: a rough brightness
+        import array
+        x = array.array("h", raw)[0::2]
+        return sum(1 for i in range(1, len(x)) if (x[i - 1] < 0) != (x[i] < 0))
+    zt, zp, z3 = (crossings(runs[k][1]) for k in ("tile", "tile-picked", "bass-303"))
+    c += [("the bass tile plays", *heard(out / f"{name}-tile", 3600, 4500)),
+          ("the bass tile is already the kid BASS", zt > 0 and abs(zt - zp) <= max(zt, zp) // 20,
+           f"{zt} zero crossings vs {zp} after picking BASS again ({z3} for the 303)")]
     results[name] = c
     # EDIT: the sound panel. REVERB and LONG keep a note ringing after the key is let go.
     name = "sound-edit"
