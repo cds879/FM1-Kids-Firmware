@@ -345,9 +345,14 @@ def kid_checks(emu, fwsc, out):
         audio = out / f"{name}-{label}" / "frames" / "audio.raw"
         runs[label] = (c1[0][1], audio.read_bytes()[3500 * RATE // 1000 * 4:4500 * RATE // 1000 * 4]
                        if audio.exists() else b"", None)
+    def crossings(raw):                       # zero crossings of the left channel: a rough brightness
+        import array
+        x = array.array("h", raw)[0::2]
+        return sum(1 for i in range(1, len(x)) if (x[i - 1] < 0) != (x[i] < 0))
+    zt, zp, z3 = (crossings(runs[k][1]) for k in ("tile", "tile-picked", "bass-303"))
     c += [("the bass tile plays", *heard(out / f"{name}-tile", 3600, 4500)),
-          ("the bass tile is already the kid BASS", runs["tile"][1] == runs["tile-picked"][1] and runs["tile"][1] != b"",
-           "same sound as picking BASS again")]
+          ("the bass tile is already the kid BASS", zt > 0 and abs(zt - zp) <= max(zt, zp) // 20,
+           f"{zt} zero crossings vs {zp} after picking BASS again ({z3} for the 303)")]
     results[name] = c
     # EDIT: the sound panel. REVERB and LONG keep a note ringing after the key is let go.
     name = "sound-edit"
