@@ -14,7 +14,7 @@ M-VAVE's, unchanged.
 | *(fun)* | Every note played floats up its tile as a little coloured note; each tile's picture dances and shows a loudness bar while it sounds, also when the song plays it |
 | **SEQ** | BEAT mode: white keys switch the 16 steps on and off; black keys pick the drum (or note) to place. Other drums show as dots; melody steps show their note by colour and height |
 | **ALGORITHM** in BEAT | Choose the song part, A to D. Turning to a new part copies the part before it, ready to change. The song plays A, B, C, D in turn and BEAT follows along while it plays. A part with no steps left drops out of the song. In BEAT, PRESETS (or the black keys) picks the drum |
-| **HOME** | Back to the instrument tiles |
+| **HOME** | Tap: back to the instrument tiles. **Hold: help** — a screen showing what each button does on the page you are on (playing, BEAT, SOUND, KEYS, SONGS or PLAY ALONG); let go to go back |
 | **PLAY** | Start / stop |
 | **REC** | Record what you play into the loop |
 | **KNOB 1–4** | LOUD, BRIGHT (each engine's brightness), SOUND (another version of the same instrument, with its name), SPEED. Turn fast for bigger steps |
@@ -31,7 +31,7 @@ The battery icon shows the stock firmware's three levels, a + while on USB
 power, and flashes red with CHARGE ME! when nearly empty (the song saves
 itself then too). A keyboard on MIDI channel 1 (USB, Bluetooth or the DIN
 jack) plays the chosen instrument; channels 2–16 keep their usual tracks.
-The firmware identifies itself as `FM-1_8100001` (FM1 Kids 0.8), still in
+The firmware identifies itself as `FM-1_8100001` (FM1 Kids 0.9), still in
 M-VAVE's open range, so the workbench can install other firmware over it.
 
 **For parents, hold GLO** to open the Bluetooth MIDI panel. By default a

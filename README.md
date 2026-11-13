@@ -13,7 +13,7 @@ sound engines.
 
 ![FM1 Kids screens: instrument tiles, drum steps, melody steps, arpeggiator settings](docs/images/screens.png)
 
-> Unofficial and not affiliated with M-VAVE. Version 0.8 passes every test in
+> Unofficial and not affiliated with M-VAVE. Version 0.9 passes every test in
 > an emulator of the FM-1; earlier versions run on a real FM-1. Back
 > up your FM-1 first; see the [flashing guide](docs/FLASHING.md).
 
@@ -35,6 +35,8 @@ sound engines.
 - **Scales and one-key chords:** EDIT twice picks a scale (HAPPY, SAD, DO RE MI,
   SPOOKY, DREAMY, ALL KEYS), turns on CHORDS, so one key plays a chord, and
   SILLY sounds: WOBBLE, BOING, ZOOM or SIREN while a key is held.
+- **Hold HOME for help:** a screen showing what each button does on the page
+  he is on.
 - **Play along:** 8 tunes (Twinkle, Happy Birthday, Ode to Joy, ...) where the
   next key to press lights up.
 - **Animations:** notes float up the tile as they are played; pictures dance to
