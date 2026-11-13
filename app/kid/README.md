@@ -20,7 +20,7 @@ M-VAVE's, unchanged.
 | **KNOB 1–4** | LOUD, BRIGHT (each engine's brightness), SOUND (another version of the same instrument, with its name), SPEED. Turn fast for bigger steps |
 | **ARP** | Arpeggiator. Tap: UP, DOWN, BOUNCE (up and down), RANDOM, OFF. Hold about a second: HOLD (notes keep going after the keys are let go). Hold and turn KNOB 1–4: FAST (1/4, 1/8, 1/16, 1/32 of a beat), OCTAVES (1–4), LENGTH (25–100%), SWING (0–50%). It follows SPEED. On drums it repeats the drum |
 | **SEL** | Quiet / unquiet the chosen instrument |
-| **EDIT** | Sound panel for the chosen instrument: KNOB 1–4 are REVERB, ECHO, LONG (how long notes ring after the key is let go) and ROOM (reverb size, shared by all instruments). Press EDIT again for **KEYS**: KNOB 1 is SCALE (HAPPY, SAD, DO RE MI, SPOOKY, DREAMY, ALL KEYS) and KNOB 2 is CHORDS (one key plays a whole chord, also when placing steps in BEAT mode). EDIT a third time (or HOME) closes it |
+| **EDIT** | Sound panel for the chosen instrument: KNOB 1–4 are REVERB, ECHO, LONG (how long notes ring after the key is let go) and ROOM (reverb size, shared by all instruments). Press EDIT again for **KEYS**: KNOB 1 is SCALE (HAPPY, SAD, DO RE MI, SPOOKY, DREAMY, ALL KEYS) and KNOB 2 is CHORDS (one key plays a whole chord, also when placing steps in BEAT mode). KNOB 3 is SILLY: WOBBLE (wavy), BOING (springs up into the note), ZOOM (falls away) or SIREN (up and down) while a key is held. EDIT a third time (or HOME) closes it |
 | **ENV** | Songs. Turn SELECT to choose MY SONG or one of the 16 demo songs, then press PLAY to load it (its instruments and patterns) and play. Everything in a demo can be changed. ENV again closes the list |
 | **LFO** | Undo |
 | **SAVE** | Save now. The song also saves by itself once it has been left alone for a few seconds while stopped |
@@ -31,7 +31,7 @@ The battery icon shows the stock firmware's three levels, a + while on USB
 power, and flashes red with CHARGE ME! when nearly empty (the song saves
 itself then too). A keyboard on MIDI channel 1 (USB, Bluetooth or the DIN
 jack) plays the chosen instrument; channels 2–16 keep their usual tracks.
-The firmware identifies itself as `FM-1_8100001` (FM1 Kids 0.7), still in
+The firmware identifies itself as `FM-1_8100001` (FM1 Kids 0.8), still in
 M-VAVE's open range, so the workbench can install other firmware over it.
 
 **For parents, hold GLO** to open the Bluetooth MIDI panel. By default a

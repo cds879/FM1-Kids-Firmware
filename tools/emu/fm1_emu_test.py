@@ -310,6 +310,21 @@ def kid_checks(emu, fwsc, out):
          ("CHORDS adds notes", keyruns["chord"][2] > keyruns["happy"][2] * 1.2,
           f"peak {keyruns['chord'][2]} vs {keyruns['happy'][2]} for one note")]
     results[name] = c
+    # SILLY (EDIT twice, K3): WOBBLE and BOING bend a held note.
+    name = "silly"
+    silly_runs = {}
+    for label, turns in (("plain", ""), ("wobble", "2000:EDIT,2100:EDIT^,2200:EDIT,2300:EDIT^,2500:e4:1,"),
+                         ("boing", "2000:EDIT,2100:EDIT^,2200:EDIT,2300:EDIT^,2500:e4:2,")):
+        r, c1 = kid_run(emu, fwsc, out, f"{name}-{label}", 4500, turns + "3000:C4@100,4000:C4^")
+        audio = out / f"{name}-{label}" / "frames" / "audio.raw"
+        silly_runs[label] = (c1[0][1], audio.read_bytes()[3000 * RATE // 1000 * 4:4000 * RATE // 1000 * 4]
+                             if audio.exists() else b"")
+    c = [("emulator ran cleanly", all(v[0] for v in silly_runs.values()), "3 runs"),
+         ("the note plays", *heard(out / f"{name}-wobble", 3000, 4000)),
+         ("WOBBLE bends the note", silly_runs["wobble"][1] != silly_runs["plain"][1], "sound differs from plain"),
+         ("BOING bends it another way", silly_runs["boing"][1] not in (silly_runs["plain"][1], silly_runs["wobble"][1]),
+          "differs from plain and wobble")]
+    results[name] = c
     # Song parts: in BEAT, ALGORITHM adds PART B as a copy of A. With B thinned
     # to one step, the song (A then B) has fewer notes than A looping alone.
     name = "parts"
@@ -541,7 +556,7 @@ def main():
     ap.add_argument("--reference")
     ap.add_argument("--reference-label", help="how to name the reference in the summary")
     ap.add_argument("--suite", choices=["generic", "kids"], default="generic",
-                    help="kids: also test FM1 Kids behaviours (start over, songs, learn, keys, parts, sparks, quiet, picker, instruments, sound edit, autosave, arpeggiator, battery)")
+                    help="kids: also test FM1 Kids behaviours (start over, songs, learn, keys, silly, parts, sparks, quiet, picker, instruments, sound edit, autosave, arpeggiator, battery)")
     a = ap.parse_args()
     out = pathlib.Path(a.out)
     results, digests = test(a.emu, a.fwsc, out / "build", a.suite)
