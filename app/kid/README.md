@@ -8,14 +8,14 @@ M-VAVE's, unchanged.
 
 | Control | What it does |
 |---|---|
-| **SELECT** knob | Pick an instrument. Each tile has a picture: piano, bass, game (chiptune), guitar, fun (samples), drums |
-| **ALGORITHM** knob | Change the chosen tile's instrument; it switches when the knob rests |
+| **SELECT** knob | Pick a tile. Each tile shows its instrument's picture and name |
+| **ALGORITHM** knob | Change the chosen tile's instrument: piano, organ, trumpet, flute, violin, choir, bells, xylophone, guitar, bass, robot, dream, game (chiptune), fun (samples) or drums. It switches when the knob rests |
 | **Piano keys** | Play the instrument. On melodic instruments every key fits ("happy keys": C major pentatonic) |
 | **SEQ** | BEAT mode: white keys switch the 16 steps on and off; black keys pick the drum (or note) to place. Other drums show as dots; melody steps show their note by colour and height |
 | **HOME** | Back to the instrument tiles |
 | **PLAY** | Start / stop |
 | **REC** | Record what you play into the loop |
-| **KNOB 1–4** | LOUD, BRIGHT (each engine's brightness), SOUND (shows the sound's name), SPEED |
+| **KNOB 1–4** | LOUD, BRIGHT (each engine's brightness), SOUND (another version of the same instrument, with its name), SPEED |
 | **ARP** | Arpeggiator. Tap: UP, DOWN, BOUNCE (up and down), RANDOM, OFF. Hold about a second: HOLD (notes keep going after the keys are let go). Hold and turn KNOB 1–4: FAST (1/4, 1/8, 1/16, 1/32 of a beat), OCTAVES (1–4), LENGTH (25–100%), SWING (0–50%). It follows SPEED. On drums it repeats the drum |
 | **SEL** | Quiet / unquiet the chosen instrument |
 | **EDIT** | Undo |
@@ -57,3 +57,30 @@ track loops 16 steps, one row of white keys.
   the screen whose contents changed are sent to the LCD.
 
 To put it on an FM-1, see [docs/FLASHING.md](../../docs/FLASHING.md).
+
+## Instruments
+
+Several instruments share the DX7 engine and differ by their starting voice
+from the 128 factory voices. They are set in `kind_sound` in
+`kid_screen.inc`, so any of them can be swapped after listening on the FM-1:
+
+| Instrument | Engine | Starting factory voice |
+|---|---|---|
+| PIANO | DX7 | 1 (piano) |
+| ORGAN | DX7 | 2 (organ) |
+| TRUMPET | DX7 | 65 (brass) |
+| FLUTE | DX7 | 66 (woodwind) |
+| VIOLIN | DX7 | 67 (strings) |
+| CHOIR | DX7 | 68 (voice) |
+| BELLS | DX7 | 121 (tubular bells) |
+| XYLOPHONE | DX7 | 118 (kalimba) |
+| ROBOT | DX7 | 3 (synth lead) |
+| DREAM | DX7 | 4 (synth pad) |
+| GUITAR | pluck | |
+| BASS | 303 | |
+| GAME | chiptune (PSG) | |
+| FUN | sampler | |
+| DRUMS | 808 drums | |
+
+On a DX7 instrument, SOUND steps only through voices of the same family
+(`voice_look`), so a trumpet stays a brass sound and the picture stays right.
