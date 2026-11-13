@@ -13,8 +13,8 @@ sound engines.
 
 ![FM1 Kids screens: instrument tiles, drum steps, melody steps, arpeggiator settings](docs/images/screens.png)
 
-> Unofficial and not affiliated with M-VAVE. Version 0.2 passes every test in
-> an emulator of the FM-1 but has not yet been confirmed on a real FM-1. Back
+> Unofficial and not affiliated with M-VAVE. Version 0.3 passes every test in
+> an emulator of the FM-1; earlier versions run on a real FM-1. Back
 > up your FM-1 first; see the [flashing guide](docs/FLASHING.md).
 
 ## What it does
@@ -22,7 +22,7 @@ sound engines.
 - **Eight tiles, 15 instruments with pictures:** piano, organ, trumpet, flute,
   violin, choir, bells, xylophone, guitar, bass, robot, dream, game (chiptune),
   fun (samples) and drums. Turn SELECT to choose one and play the keys. On
-  melodic instruments every key fits (a C major pentatonic scale), so nothing
+  melodic instruments every key fits (HAPPY, a C major pentatonic scale, to start), so nothing
   sounds wrong. Turn ALGORITHM to swap a tile's instrument.
 - **BEAT mode (SEQ):** the 16 white keys are 16 steps and the black keys pick
   the drum or note. Key lights show the pattern and the playhead. Every drum
@@ -32,6 +32,8 @@ sound engines.
 - **Four knobs:** LOUD, BRIGHT, SOUND (other versions of the same instrument,
   with the sound's name) and SPEED. Turning fast takes bigger steps.
 - **EDIT sound panel:** REVERB, ECHO, LONG (how long notes ring) and ROOM.
+- **Scales and one-key chords:** EDIT twice picks a scale (HAPPY, SAD, DO RE MI,
+  SPOOKY, DREAMY, ALL KEYS) and turns on CHORDS, so one key plays a chord.
 - **16 demo songs:** ENV opens a list of M-VAVE's demo songs; each loads its
   instruments and patterns, ready to change. MY SONG brings his own back.
 - **Hard to lose work:** songs save themselves once left alone while stopped,

@@ -294,6 +294,22 @@ def kid_checks(emu, fwsc, out):
           ("MY SONG comes back and plays", *heard(out / name, 7400, 10000)),
           ("the demo shows its own instruments", demo_lcd is not None and demo_lcd != mine_lcd, "screens differ")]
     results[name] = c
+    # Keys page (EDIT twice): SCALE changes where keys snap; CHORDS plays three notes per key.
+    name = "keys"
+    keyruns = {}
+    for label, turns in (("happy", ""), ("sad", "2000:EDIT,2100:EDIT^,2200:EDIT,2300:EDIT^,2500:e2:1,"),
+                         ("chord", "2000:EDIT,2100:EDIT^,2200:EDIT,2300:EDIT^,2500:e3:1,")):
+        r, c1 = kid_run(emu, fwsc, out, f"{name}-{label}", 4500, turns + "3000:F#4@100,4000:F#4^")
+        audio = out / f"{name}-{label}" / "frames" / "audio.raw"
+        keyruns[label] = (c1[0][1], audio.read_bytes()[3000 * RATE // 1000 * 4:4000 * RATE // 1000 * 4]
+                          if audio.exists() else b"", window_peak(out / f"{name}-{label}", 3000, 4000))
+    c = [("emulator ran cleanly", all(v[0] for v in keyruns.values()), "3 runs"),
+         ("a key plays", *heard(out / f"{name}-happy", 3000, 4000)),
+         ("SAD moves the key to another note", keyruns["sad"][1] != keyruns["happy"][1] and keyruns["sad"][2] > QUIET_PEAK,
+          f"peak {keyruns['sad'][2]}"),
+         ("CHORDS adds notes", keyruns["chord"][2] > keyruns["happy"][2] * 1.2,
+          f"peak {keyruns['chord'][2]} vs {keyruns['happy'][2]} for one note")]
+    results[name] = c
     # Quiet: SEL (SCL in the emulator) mutes the chosen instrument and unmutes it again.
     name = "quiet"
     r, c = kid_run(emu, fwsc, out, name, 6500, PATTERN + ",2200:PLAY,2300:PLAY^,3000:HOME,3100:HOME^,3200:SCL,3300:SCL^,4500:SCL,4600:SCL^")
@@ -459,7 +475,7 @@ def main():
     ap.add_argument("--reference")
     ap.add_argument("--reference-label", help="how to name the reference in the summary")
     ap.add_argument("--suite", choices=["generic", "kids"], default="generic",
-                    help="kids: also test FM1 Kids behaviours (start over, songs, quiet, picker, instruments, sound edit, autosave, arpeggiator, battery)")
+                    help="kids: also test FM1 Kids behaviours (start over, songs, keys, quiet, picker, instruments, sound edit, autosave, arpeggiator, battery)")
     a = ap.parse_args()
     out = pathlib.Path(a.out)
     results, digests = test(a.emu, a.fwsc, out / "build", a.suite)
