@@ -14,7 +14,7 @@
  *                    black keys pick the drum (or note) to place; ALGORITHM picks the
  *                    song part (A-D) to show, a new part starts as a copy of
  *                    the one before, and the song plays its parts in turn
- *   HOME             back to PLAY mode
+ *   HOME             tap: back to PLAY mode; hold: help for this page
  *   PLAY             start / stop      REC   record what you play
  *   K1..K4           LOUD, BRIGHT, SOUND, SPEED; turn fast for big steps.
  *                    SOUND keeps to versions of the same instrument
@@ -142,7 +142,36 @@ static const uint8_t punctuation[][6] = {{'!', 0, 0, 0x5f, 0, 0}, {'-', 8, 8, 8,
                                          {'?', 2, 1, 0x51, 9, 6}, {'.', 0, 0x60, 0x60, 0, 0}, {'=', 0x14, 0x14, 0x14, 0x14, 0x14},
                                          {'#', 0x14, 0x7f, 0x14, 0x7f, 0x14}, {'<', 8, 0x14, 0x22, 0x41, 0},
                                          {'>', 0x41, 0x22, 0x14, 8, 0}, {':', 0, 0x36, 0x36, 0, 0},
-                                         {'/', 0x60, 0x18, 6, 1, 0}, {'%', 0x63, 0x13, 8, 0x64, 0x63}};
+                                         {'/', 0x60, 0x18, 6, 1, 0}, {'%', 0x63, 0x13, 8, 0x64, 0x63},
+                                         {',', 0, 0x50, 0x30, 0, 0}};
+
+/* ---------- help: hold HOME ---------- */
+/* Holding HOME shows what the buttons do on the page you are on. */
+enum { H_NONE, H_PLAY, H_BEAT, H_SOUND, H_KEYS, H_SONGS, H_LEARN, H_PAGES };
+static const struct { const char *title; const char *rows[12][2]; } help_pages[H_PAGES] = {
+    {"", {{0, 0}}},
+    {"PLAYING", {{"KEYS", "PLAY YOUR INSTRUMENT"}, {"SELECT", "PICK A PICTURE"},
+                 {"ALGO", "CHANGE THE INSTRUMENT"}, {"KNOBS", "LOUD BRIGHT SOUND SPEED"},
+                 {"OCT -+", "LOWER OR HIGHER"}, {"SEQ", "MAKE A BEAT"},
+                 {"PLAY", "START/STOP.  REC: RECORD"}, {"EDIT", "SOUND, SCALE, SILLY"},
+                 {"ENV", "SONGS AND PLAY ALONG"}, {"ARP", "NOTES RUN UP AND DOWN"},
+                 {"LFO", "UNDO.   SEL: QUIET"}, {"FX FX", "START THIS ONE OVER"}}},
+    {"MAKING A BEAT", {{"WHITE", "TURN A STEP ON OR OFF"}, {"BLACK", "PICK THE DRUM OR NOTE"},
+                       {"PRESETS", "PICK THE DRUM TOO"}, {"ALGO", "SONG PART A B C D"},
+                       {"PLAY", "START OR STOP"}, {"SELECT", "PICK A PICTURE"},
+                       {"OCT -+", "LOWER OR HIGHER NOTES"}, {"KNOBS", "LOUD BRIGHT SOUND SPEED"},
+                       {"LFO", "UNDO"}, {"HOME", "BACK TO PLAYING"}}},
+    {"SOUND", {{"KNOB 1", "REVERB: A BIG ROOM"}, {"KNOB 2", "ECHO... ECHO..."},
+               {"KNOB 3", "LONG: NOTES RING ON"}, {"KNOB 4", "ROOM: HOW BIG"},
+               {"EDIT", "MORE: SCALE AND CHORDS"}, {"HOME", "ALL DONE"}}},
+    {"KEYS", {{"KNOB 1", "SCALE: HAPPY, SAD..."}, {"KNOB 2", "CHORDS: ON OR OFF"},
+              {"KNOB 3", "SILLY: WOBBLE, BOING..."}, {"EDIT", "ALL DONE"}, {"HOME", "ALL DONE"}}},
+    {"SONGS", {{"SELECT", "PICK A SONG"}, {"PLAY", "LOAD IT AND LISTEN"},
+               {"", "MY SONG: YOUR OWN SONG"}, {"", "DEMOS: CHANGE THEM!"},
+               {"", "PLAY ALONG: LEARN A TUNE"}, {"ENV", "ALL DONE"}}},
+    {"PLAY ALONG", {{"KEYS", "PRESS THE ONE THAT"}, {"", "LIGHTS UP!"},
+                    {"NEXT", "THE NOTE AFTER THAT"}, {"OCT -+", "THE LIGHT FOLLOWS"},
+                    {"HOME", "STOP"}}}};
 
 /* ---------- state ---------- */
 static unsigned track, mode, drum, recording, playing, play_step, retry_reset;
@@ -211,7 +240,9 @@ static const struct { const char *name; uint8_t notes[56]; } tunes[TUNES] = {
 enum { DEMO_SLOT = GROOVE_PROJECT_SLOTS - 1, SONGS = 1 + GROOVE_FACTORY_PROJECTS + TUNES };
 static unsigned learn, learn_pos, learn_key = 0xff, learn_scale, learn_chords;   /* learn: tune + 1 */
 static uint32_t learn_done_at;
-static unsigned sound_panel;          /* EDIT: REVERB, ECHO, LONG and ROOM on K1..K4 */
+static unsigned sound_panel;
+static unsigned help, home_page;      /* hold HOME: the help page shown, the page HOME was pressed on */
+static uint32_t home_down_at;          /* EDIT: REVERB, ECHO, LONG and ROOM on K1..K4 */
 static int8_t knob_dir[7];            /* knob acceleration: turning fast takes bigger steps */
 static uint8_t knob_speed[7];
 static uint32_t knob_at[7];
@@ -630,6 +661,10 @@ int groove_kid_route(const uint8_t *m, size_t n, uint8_t out[3])
  * elements whose signature changed are repainted. */
 static int rect(unsigned e, unsigned *x, unsigned *y, unsigned *w, unsigned *h)
 {
+    if (help) {                                         /* the help page covers the screen */
+        if (e != E_BODY) return 0;
+        *x = 0; *y = 0; *w = 240; *h = 240; return 1;
+    }
     if (e == E_HEAD) { *x = 0; *y = 0; *w = 240; *h = 40; return 1; }
     if (e == E_BODY) { *x = 0; *y = 40; *w = 240; *h = 150; return 1; }
     if (e == E_FOOT) { *x = 0; *y = 190; *w = 240; *h = 50; return 1; }
@@ -645,7 +680,7 @@ static uint32_t mix(uint32_t s, uint32_t v) { return s * 131U + v; }
 static uint32_t signature(unsigned e)
 {
     uint32_t base = mode | track << 1;
-    if (e == E_BODY) return mode;
+    if (e == E_BODY) return help ? 0x7e000000U | help : mode;
     if (e == E_HEAD)
         return mix(mix(mix(mix(base | playing << 4 | recording << 5 | (uint32_t)(octave + 4) << 6, view.tempo),
                            (ble.state >= FM1_BLE_CONNECTED && ble.state <= FM1_BLE_READY)),
@@ -1002,11 +1037,28 @@ static void draw_cell(unsigned i, unsigned x, unsigned y, unsigned w, unsigned h
     } else fill(x, y, w, h, off);
     if (playing && play_step == i) frame(x, y, w, h, 3, INK);
 }
+static void draw_help(void)
+{
+    fill(0, 0, 240, 240, BG);
+    text(6, 6, "HELP:", 2, kid_colors[4]);
+    text(72, 6, help_pages[help].title, 2, INK);
+    for (unsigned r = 0; r < 12 && help_pages[help].rows[r][1]; ++r) {
+        unsigned y = 28 + r * 16U;
+        const char *chip = help_pages[help].rows[r][0];
+        if (chip && chip[0]) {
+            fill(4, y, 50, 13, kid_colors[r % 8U]);
+            text_center(4, 50, y + 3, chip, 1, BG);
+        }
+        text(60, y + 3, help_pages[help].rows[r][1], 1, INK);
+    }
+    text_center(0, 240, 228, "LET GO OF HOME TO GO BACK", 1, OFF4);
+}
 static void draw_element(unsigned e)
 {
     unsigned x, y, w, h;
     if (!rect(e, &x, &y, &w, &h) || y >= paint_top + PAINT_ROWS || y + h <= paint_top) return;
-    if (e == E_BODY) fill(x, y, w, h, BG);
+    if (e == E_BODY && help) draw_help();
+    else if (e == E_BODY) fill(x, y, w, h, BG);
     else if (e == E_HEAD) draw_head();
     else if (e == E_FOOT) draw_foot();
     else if (mode == KID_PLAY) draw_tile(e - E_ITEMS, x, y, w, h);
@@ -1327,6 +1379,28 @@ void groove_screen_control(void)
         paint();
         return;
     }
+    /* HOME: a tap goes home; held, it shows help for the page it was pressed on. */
+    if (pressed & BUTTON(HOME)) {
+        home_down_at = now | 1U;
+        home_page = learn ? H_LEARN : songs_panel ? H_SONGS : sound_panel == 2 ? H_KEYS : sound_panel ? H_SOUND
+                  : mode == KID_BEAT ? H_BEAT : H_PLAY;
+    }
+    if (home_down_at && (c.buttons & BUTTON(HOME)) && !help && since(now, home_down_at) >= 600) {
+        release_keys();
+        help = home_page;
+        memset(shown, 0xff, sizeof shown);
+    }
+    if (home_down_at && !(c.buttons & BUTTON(HOME))) {
+        if (help) { help = 0; memset(shown, 0xff, sizeof shown); paint_mark(0, 0, 240, 240); }
+        else { mode = KID_PLAY; sound_panel = songs_panel = 0; learn_stop(); }
+        home_down_at = 0;
+    }
+    if (help) {                                        /* reading the help: everything else waits */
+        previous_buttons = c.buttons;
+        previous_keys = c.keys;
+        paint();
+        return;
+    }
     if (songs_panel) {                                 /* ENV: SELECT, ALGORITHM or PRESETS browse the songs */
         int d = c.encoders[0] + c.encoders[1] + c.encoders[6];
         song_pick = (unsigned)clampi((int)song_pick + d, 0, SONGS - 1);
@@ -1405,7 +1479,6 @@ void groove_screen_control(void)
         confirm_until = (now + 4000U) | 1U;
         pressed &= ~BUTTON(FX);
     }
-    if (pressed & BUTTON(HOME)) { mode = KID_PLAY; sound_panel = songs_panel = 0; learn_stop(); }
     if (pressed & BUTTON(ENV)) {
         songs_panel = !songs_panel;
         if (songs_panel) { song_pick = current_song(); sound_panel = 0; }

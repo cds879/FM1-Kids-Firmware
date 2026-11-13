@@ -392,6 +392,20 @@ def kid_checks(emu, fwsc, out):
           ("the right key moves it on", foot(4900) != foot(5500), "next note shown"),
           ("the keys still play", *heard(out / name, 5000, 5400))]
     results[name] = c
+    # Help: holding HOME shows the buttons for the page you are on; letting go goes back.
+    name = "help"
+    r, c = kid_run(emu, fwsc, out, name, 8000, "2000:HOME,3500:HOME^,4500:SEQ,4600:SEQ^,5500:HOME,7000:HOME^")
+    try:
+        before, play_help, after = (frame_lcd(out / name, ms)[2] for ms in (1900, 3000, 4300))
+        beat, beat_help = frame_lcd(out / name, 5400)[2], frame_lcd(out / name, 6500)[2]
+        home_again = frame_lcd(out / name, 7800)[2]
+    except (FileNotFoundError, IndexError):
+        before = play_help = after = beat = beat_help = home_again = None
+    c += [("holding HOME shows help", play_help is not None and play_help != before, "screen changed"),
+          ("letting go goes back", after == before, "same screen as before"),
+          ("BEAT has its own help", beat_help is not None and beat_help not in (beat, play_help), "different page"),
+          ("a held HOME does not leave BEAT", home_again == beat, "still in BEAT after the help")]
+    results[name] = c
     # Quiet: SEL (SCL in the emulator) mutes the chosen instrument and unmutes it again.
     name = "quiet"
     r, c = kid_run(emu, fwsc, out, name, 6500, PATTERN + ",2200:PLAY,2300:PLAY^,3000:HOME,3100:HOME^,3200:SCL,3300:SCL^,4500:SCL,4600:SCL^")
@@ -557,7 +571,7 @@ def main():
     ap.add_argument("--reference")
     ap.add_argument("--reference-label", help="how to name the reference in the summary")
     ap.add_argument("--suite", choices=["generic", "kids"], default="generic",
-                    help="kids: also test FM1 Kids behaviours (start over, songs, learn, keys, silly, parts, sparks, quiet, picker, instruments, sound edit, autosave, arpeggiator, battery)")
+                    help="kids: also test FM1 Kids behaviours (start over, help, songs, learn, keys, silly, parts, sparks, quiet, picker, instruments, sound edit, autosave, arpeggiator, battery)")
     a = ap.parse_args()
     out = pathlib.Path(a.out)
     results, digests = test(a.emu, a.fwsc, out / "build", a.suite)
