@@ -406,6 +406,17 @@ def kid_checks(emu, fwsc, out):
           ("BEAT has its own help", beat_help is not None and beat_help not in (beat, play_help), "different page"),
           ("a held HOME does not leave BEAT", home_again == beat, "still in BEAT after the help")]
     results[name] = c
+    try:                                   # both help pages side by side, for looking at (also in the log)
+        cells = [crop(read_ppm(out / name / "frames" / f"{ms // 100:06d}.ppm"), (LCD[0], LCD[1], 480, 480))
+                 for ms in (3000, 6500)]
+        px = b"".join(b"".join(cell[2][r * 1440:(r + 1) * 1440] for cell in cells) for r in range(480))
+        write_png(out / "help-pages.png", (960, 480, px))
+        import base64
+        print("HELP-PNG-BEGIN")
+        print(base64.b64encode((out / "help-pages.png").read_bytes()).decode())
+        print("HELP-PNG-END")
+    except (FileNotFoundError, IndexError):
+        pass
     # Quiet: SEL (SCL in the emulator) mutes the chosen instrument and unmutes it again.
     name = "quiet"
     r, c = kid_run(emu, fwsc, out, name, 6500, PATTERN + ",2200:PLAY,2300:PLAY^,3000:HOME,3100:HOME^,3200:SCL,3300:SCL^,4500:SCL,4600:SCL^")
