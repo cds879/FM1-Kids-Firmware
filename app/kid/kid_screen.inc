@@ -915,6 +915,7 @@ static void draw_tile(unsigned i, unsigned x, unsigned y, unsigned w, unsigned h
     tile_move(i, look_i, &dx, &dy, &lit);
     picture((unsigned)((int)x + 4 + dx), (unsigned)((int)y + 6 + dy), look_i, 0,
             v.muted ? OFF4 : lit ? (selected ? BG : c) : selected ? INK : SOFT);
+    text_center(x, w, y + h - 16, v.muted ? "QUIET" : kind_name[look_i], 1, v.muted ? SOFT : selected ? BG : INK);
     if (level) fill(x + 4, y + h - 5, (w - 8) * level / 127U, 2, selected ? BG : INK);   /* how loud */
     clip_x0 = (int)x + 3; clip_y0 = (int)y + 3; clip_x1 = (int)(x + w) - 3; clip_y1 = (int)(y + h) - 18;
     for (unsigned k = 0; k < SPARKS; ++k) {
