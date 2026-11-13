@@ -15,12 +15,13 @@ M-VAVE's, unchanged.
 | **HOME** | Back to the instrument tiles |
 | **PLAY** | Start / stop |
 | **REC** | Record what you play into the loop |
-| **KNOB 1–4** | LOUD, BRIGHT (each engine's brightness), SOUND (another version of the same instrument, with its name), SPEED |
+| **KNOB 1–4** | LOUD, BRIGHT (each engine's brightness), SOUND (another version of the same instrument, with its name), SPEED. Turn fast for bigger steps |
 | **ARP** | Arpeggiator. Tap: UP, DOWN, BOUNCE (up and down), RANDOM, OFF. Hold about a second: HOLD (notes keep going after the keys are let go). Hold and turn KNOB 1–4: FAST (1/4, 1/8, 1/16, 1/32 of a beat), OCTAVES (1–4), LENGTH (25–100%), SWING (0–50%). It follows SPEED. On drums it repeats the drum |
 | **SEL** | Quiet / unquiet the chosen instrument |
-| **EDIT** | Undo |
+| **EDIT** | Sound panel for the chosen instrument: KNOB 1–4 are REVERB, ECHO, LONG (how long notes ring after the key is let go) and ROOM (reverb size, shared by all instruments). EDIT again (or HOME) closes it |
+| **LFO** | Undo |
 | **SAVE** | Save now. The song also saves by itself once it has been left alone for a few seconds while stopped |
-| **FX**, then **FX** | Start the chosen instrument over (EDIT brings it back) |
+| **FX**, then **FX** | Start the chosen instrument over (LFO brings it back) |
 | **OCT− / OCT+** | Lower / higher |
 
 The battery icon shows the stock firmware's three levels, a + while on USB
@@ -76,11 +77,26 @@ from the 128 factory voices. They are set in `kind_sound` in
 | XYLOPHONE | DX7 | 118 (kalimba) |
 | ROBOT | DX7 | 3 (synth lead) |
 | DREAM | DX7 | 4 (synth pad) |
-| GUITAR | pluck | |
-| BASS | 303 | |
+| GUITAR | pluck, then DX7 | |
+| BASS | DX7, then 303 | 35 (bass 1) |
 | GAME | chiptune (PSG) | |
 | FUN | sampler | |
 | DRUMS | 808 drums | |
 
-On a DX7 instrument, SOUND steps only through voices of the same family
-(`voice_look`), so a trumpet stays a brass sound and the picture stays right.
+SOUND steps through every version of the same instrument, and the picture
+always matches what is playing (`voice_look`):
+
+| Picture | DX7 factory voices (1–128) |
+|---|---|
+| PIANO | the 8 pianos |
+| ORGAN | the 8 organs |
+| ROBOT | the 8 synth leads, and odd sounds (BOWOAN, MONO, SAW EM UP, TAMBOURINE, BRUSHES, PERCUSSION, WHAT IF, ...) |
+| DREAM | the 8 synth pads, WAVES, DESCENT, ECHO |
+| GUITAR | the 8 guitars and 8 DS guitars, after the pluck engine's sounds |
+| BASS | the 8 basses and 8 synth basses, then the 303 bass line |
+| TRUMPET | the 8 brass |
+| FLUTE | the 8 woodwinds |
+| VIOLIN | the 8 strings |
+| CHOIR | the 8 voices |
+| BELLS | FROGBELL, ELECT.GONG, TIBET, COWBELL, FINGERCYM, CLANG BELL, BI BEN, GAMALONG, TUB BELLS |
+| XYLOPHONE | BLOCK, LOG DRUM, TIMPANI, STEEL DRUM, CONGA, KALIMBA, TOM TOMS, TIMBALI |
