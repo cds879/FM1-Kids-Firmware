@@ -15,6 +15,10 @@
 #define KID_MASTER_LIMIT 760U
 #endif
 
+/* Shown at startup and in the parent panel. The update identity (what the
+ * workbench and updater see) is FM1_UPDATE_PRODUCT in app/version.h. */
+#define KID_VERSION "0.1"
+
 /* Pattern length the kid interface keeps every track at (one row of keys). */
 #define KID_STEPS 16U
 #endif

@@ -9,16 +9,25 @@ M-VAVE's, unchanged.
 | Control | What it does |
 |---|---|
 | **SELECT** knob | Pick an instrument. Each tile has a picture: piano, bass, game (chiptune), guitar, fun (samples), drums |
+| **ALGORITHM** knob | Change the chosen tile's instrument; it switches when the knob rests |
 | **Piano keys** | Play the instrument. On melodic instruments every key fits ("happy keys": C major pentatonic) |
-| **SEQ** | BEAT mode: white keys switch the 16 steps on and off; black keys pick the drum (or note) to place |
+| **SEQ** | BEAT mode: white keys switch the 16 steps on and off; black keys pick the drum (or note) to place. Other drums show as dots; melody steps show their note by colour and height |
 | **HOME** | Back to the instrument tiles |
 | **PLAY** | Start / stop |
 | **REC** | Record what you play into the loop |
-| **KNOB 1–4** | LOUD, BRIGHT, SOUND (a different sound for this instrument), SPEED |
+| **KNOB 1–4** | LOUD, BRIGHT (each engine's brightness), SOUND (shows the sound's name), SPEED |
+| **ARP** | Quiet / unquiet the chosen instrument |
 | **EDIT** | Undo |
-| **SAVE** | Save the song |
-| hold **FX** | Clear this instrument's loop (EDIT brings it back) |
+| **SAVE** | Save now. The song also saves by itself once it has been left alone for a few seconds while stopped |
+| **FX**, then **FX** | Start the chosen instrument over (EDIT brings it back) |
 | **OCT− / OCT+** | Lower / higher |
+
+The battery icon shows the stock firmware's three levels, a + while on USB
+power, and flashes red with CHARGE ME! when nearly empty (the song saves
+itself then too). A keyboard on MIDI channel 1 (USB, Bluetooth or the DIN
+jack) plays the chosen instrument; channels 2–16 keep their usual tracks.
+The firmware identifies itself as `FM-1_8100001` (FM1 Kids 0.1), still in
+M-VAVE's open range, so the workbench can install other firmware over it.
 
 **For parents, hold GLO** to open the Bluetooth MIDI panel. By default a
 phone, tablet or computer connects to the FM-1. To use a Bluetooth MIDI
@@ -27,8 +36,7 @@ SAVE to connect. REC disconnects; HOME switches back to the default.
 
 The MASTER knob is capped at about three-quarters volume to protect young
 ears (`KID_MASTER_LIMIT` in `kid_config.h`; 1023 removes the cap). Every
-track loops 16 steps, one row of white keys. Choosing a muted instrument
-unmutes it.
+track loops 16 steps, one row of white keys.
 
 ## How it is built
 
@@ -46,3 +54,5 @@ unmutes it.
   Install other firmware the usual way, with the workbench or M-UPGRADE.
 - Drawing is the band painter adapted from M-VAVE's screen: only parts of
   the screen whose contents changed are sent to the LCD.
+
+To put it on an FM-1, see [docs/FLASHING.md](../../docs/FLASHING.md).

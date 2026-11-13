@@ -228,12 +228,97 @@ def power_cuts(emu, fwsc, out):
     return checks
 
 
-def test(emu, fwsc, out):
+# ---------- FM1 Kids behaviours (--suite kids) ----------
+# A pattern on steps 1, 5, 9, 13 made in BEAT mode (SEQ, then white keys).
+PATTERN = "1000:SEQ,1100:SEQ^,1200:F3,1300:F3^,1400:C4,1500:C4^,1600:G4,1700:G4^,1800:D5,1900:D5^"
+QUIET_PEAK = 400                   # a cleared or quieted loop stays below this (notes may still fade)
+
+
+def window_peak(work, start_ms, end_ms):
+    path = work / "frames" / "audio.raw"
+    s = samples(path.read_bytes()) if path.exists() else ()
+    seg = s[start_ms * RATE // 1000 * 2:end_ms * RATE // 1000 * 2]
+    return max((abs(v) for v in seg), default=0)
+
+
+def kid_run(emu, fwsc, out, name, ms, keys, flash=None):
+    r = run(emu, fwsc, ms, keys, out / name, flash=flash, frames=True)
+    if r["lcd"]:
+        write_png(out / f"{name}.png", r["lcd"])
+    write_wav(out / f"{name}.wav", r["raw"])
+    return r, [("emulator ran cleanly", not r["problems"], "; ".join(r["problems"]) or "ok")]
+
+
+def heard(work, start, end, loud=True):
+    pk = window_peak(work, start, end)
+    ok = pk >= LOUD_PEAK if loud else pk < QUIET_PEAK
+    return ok, f"peak {pk} at {start / 1000:g}-{end / 1000:g} s"
+
+
+def kid_checks(emu, fwsc, out):
+    results = {}
+    # Start over: FX asks, FX again clears; EDIT (undo) brings the loop back.
+    name = "startover"
+    r, c = kid_run(emu, fwsc, out, name, 7000, PATTERN + ",2200:PLAY,2300:PLAY^,3000:FX,3100:FX^,3300:FX,3400:FX^,5000:EDIT,5100:EDIT^")
+    c += [("loop plays", *heard(out / name, 2600, 3000)),
+          ("FX twice clears it", *heard(out / name, 4200, 4900, loud=False)),
+          ("EDIT brings it back", *heard(out / name, 5600, 7000))]
+    results[name] = c
+    # Quiet: ARP mutes the chosen instrument and unmutes it again.
+    name = "quiet"
+    r, c = kid_run(emu, fwsc, out, name, 6500, PATTERN + ",2200:PLAY,2300:PLAY^,3000:HOME,3100:HOME^,3200:ARP,3300:ARP^,4500:ARP,4600:ARP^")
+    c += [("loop plays", *heard(out / name, 2600, 3100)),
+          ("ARP makes it quiet", *heard(out / name, 3900, 4500, loud=False)),
+          ("ARP again brings it back", *heard(out / name, 5000, 6500))]
+    results[name] = c
+    # Instrument picker: ALGORITHM changes the tile, and the new instrument plays.
+    name = "picker"
+    r, c = kid_run(emu, fwsc, out, name, 5000, "2000:e1:3,3500:C4@100,4500:C4^")
+    try:
+        changed = frame_lcd(out / name, 1900)[2] != frame_lcd(out / name, 3000)[2]
+    except (FileNotFoundError, IndexError):
+        changed = False
+    c += [("ALGORITHM changes the picture", changed, "changed" if changed else "unchanged"),
+          ("the new instrument plays", *heard(out / name, 3600, 4500))]
+    results[name] = c
+    # Autosave: make a pattern, leave it alone, then power off and on: it is still there.
+    name = "autosave"
+    flash = out / name / "flash.bin"
+    (out / name).mkdir(parents=True, exist_ok=True)
+    flash.unlink(missing_ok=True)
+    r, c = kid_run(emu, fwsc, out, name, 16000, PATTERN, flash=flash)
+    m = re.search(r"flash: (\d+) erases / programs", r["log"])
+    r2, c2 = kid_run(emu, fwsc, out, name + "-reboot", 4500, "2000:PLAY,2100:PLAY^", flash=flash)
+    c += [("emulator ran cleanly after reboot", *c2[0][1:]),
+          ("the pattern survives a reboot without SAVE", *heard(out / (name + "-reboot"), 2600, 4500))]
+    c[-1] = (c[-1][0], c[-1][1], c[-1][2] + f"; {m.group(1) if m else 0} flash writes before")
+    results[name] = c
+    # Battery: a low reading turns the battery icon red.
+    name = "battery"
+    r, c = kid_run(emu, fwsc, out, name, 3000, "100:a3:500")
+    red = 0
+    for ms in range(1500, 3000, 100):
+        try:
+            w, h, px = frame_lcd(out / name, ms)
+        except (FileNotFoundError, IndexError):
+            continue
+        for y in range(28, 52):                     # the battery icon, drawn 2x
+            for x in range(176, 220):
+                i = (y * w + x) * 3
+                red += px[i] > 200 and px[i + 1] < 120 and px[i + 2] < 120
+    c += [("low battery shows a red battery", red > 20, f"{red} red pixels")]
+    results[name] = c
+    return results
+
+
+def test(emu, fwsc, out, suite="generic"):
     out.mkdir(parents=True, exist_ok=True)
     results, digests = {}, {}
     for name, *_ in SCENARIOS:
         results[name], digests[name] = check(name, emu, fwsc, out)
     results["powercut"] = power_cuts(emu, fwsc, out)
+    if suite == "kids":
+        results.update(kid_checks(emu, fwsc, out))
     return results, digests
 
 
@@ -244,9 +329,11 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--reference")
     ap.add_argument("--reference-label", help="how to name the reference in the summary")
+    ap.add_argument("--suite", choices=["generic", "kids"], default="generic",
+                    help="kids: also test FM1 Kids behaviours (start over, quiet, picker, autosave, battery)")
     a = ap.parse_args()
     out = pathlib.Path(a.out)
-    results, digests = test(a.emu, a.fwsc, out / "build")
+    results, digests = test(a.emu, a.fwsc, out / "build", a.suite)
     ref = test(a.emu, a.reference, out / "reference") if a.reference else None
 
     failed = [(s, c) for s, cs in results.items() for c in cs if not c[1]]

@@ -32,11 +32,15 @@ jobs:
       - name: Browser preview
         run: sh tools/unix/run.sh preview
 
-      - name: Firmware (kid UI)
+      - name: Firmware (kid UI) and its workbench page
+        env:
+          # GPL: the page links the exact source it was built from
+          FM1_SOURCE_URL: https://github.com/${{ github.repository }}/archive/${{ github.sha }}.tar.gz
         run: |
-          sh tools/unix/run.sh firmware
+          sh tools/unix/run.sh package
           mkdir -p build/out
           cp build/dx7/generated/FM1_OFFICIAL_OPEN.fwsc build/out/FM1-Kids.fwsc
+          cp build/official-web/FM1-Official-Open-Source.html build/out/FM1-Kids-Workbench.html
           for f in firmware-report package-report toolchain; do cp build/dx7/$f.json build/out/kids-$f.json; done
           cp build/dx7/sdk.map build/out/kids-sdk.map
 
@@ -49,12 +53,15 @@ jobs:
           print(f"### Flash space (kid UI)\n\nApp image {used:,} of {limit:,} bytes: **{limit - used:,} bytes free**.")
           PY
 
-      - name: Firmware (original FM1 Open UI, for comparison with M-VAVE's build)
+      - name: Firmware (original FM1 Open UI, for comparison and a first hardware test)
+        env:
+          FM1_SOURCE_URL: https://github.com/${{ github.repository }}/archive/${{ github.sha }}.tar.gz
         run: |
           sed -i 's/^#define FM1_KID_UI 1$/#define FM1_KID_UI 0/' app/kid/kid_config.h
           grep -q '^#define FM1_KID_UI 0$' app/kid/kid_config.h
-          sh tools/unix/run.sh firmware
+          sh tools/unix/run.sh package
           cp build/dx7/generated/FM1_OFFICIAL_OPEN.fwsc build/out/FM1-Open-original.fwsc
+          cp build/official-web/FM1-Official-Open-Source.html build/out/FM1-Open-original-Workbench.html
           git checkout app/kid/kid_config.h
 
       - name: Upload build
@@ -115,7 +122,7 @@ jobs:
       - name: Emulator test (kid UI)
         run: |
           python3 tools/emu/fm1_emu_test.py --emu ~/fm1-emu-bin/fm1-live \
-            --fwsc artifact/out/FM1-Kids.fwsc --out emu-results/kids
+            --fwsc artifact/out/FM1-Kids.fwsc --out emu-results/kids --suite kids
 
       - name: Emulator test (original UI, compared with M-VAVE's build)
         if: always()
@@ -145,6 +152,61 @@ jobs:
             emu-results/*/results.json
             emu-results/*/*/*.png
             emu-results/*/*/*.wav
+
+  pages:
+    # The browser installer on GitHub Pages: only from main, only after the
+    # emulator tests pass. Needs Settings > Pages > Source: GitHub Actions once;
+    # until then this job reports what to do and the workflow stays green.
+    name: Publish installer (GitHub Pages)
+    needs: [firmware, emulator]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: fm1-build-${{ github.sha }}
+          path: artifact
+
+      - name: Assemble the site
+        run: |
+          mkdir -p site
+          cp artifact/out/FM1-Kids-Workbench.html site/kids.html
+          cp artifact/out/FM1-Open-original-Workbench.html site/original.html
+          cp artifact/out/FM1-Kids.fwsc artifact/out/FM1-Open-original.fwsc site/
+          version=$(sed -n 's/^#define KID_VERSION "\(.*\)"$/\1/p' app/kid/kid_config.h)
+          sed -e "s|@KID_VERSION@|$version|g" -e "s|@REPO@|${{ github.server_url }}/${{ github.repository }}|g" \
+              -e "s|@SHA@|${{ github.sha }}|g" -e "s|@SHORT@|${GITHUB_SHA::7}|g" -e "s|@DATE@|$(date -u +%Y-%m-%d)|g" \
+              tools/pages/index.html > site/index.html
+          grep -q '@[A-Z_]*@' site/index.html && { echo "unfilled placeholder"; exit 1; } || true
+          ls -la site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Publish
+        id: deploy
+        uses: actions/deploy-pages@v4
+
+      - name: If publishing failed
+        if: failure()
+        run: |
+          {
+            echo "### Installer not published"
+            echo
+            echo "Turn on GitHub Pages once: repository **Settings > Pages > Source: GitHub Actions**."
+            echo "On a free account the repository must be public for Pages."
+          } >> "$GITHUB_STEP_SUMMARY"
 
   docker:
     name: Mac path (Docker image)
