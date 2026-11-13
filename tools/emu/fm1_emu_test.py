@@ -308,17 +308,19 @@ def kid_checks(emu, fwsc, out):
         audio = out / f"{name}-{label}" / "frames" / "audio.raw"
         seg = audio.read_bytes()[3500 * RATE // 1000 * 4:4500 * RATE // 1000 * 4] if audio.exists() else b""
         try:
-            lcd = frame_lcd(out / f"{name}-{label}", 3400)[2]
+            lcd = frame_lcd(out / f"{name}-{label}", 4400)[2]   # after the name notice
         except (FileNotFoundError, IndexError):
             lcd = None
         runs[label] = (c1[0][1], seg, lcd)
     c = [("emulator ran cleanly", all(v[0] for v in runs.values()), "4 runs")]
     for label in ("piano", "trumpet", "bells"):
         c.append((f"{label} plays", *heard(out / f"{name}-{label}", 3600, 4500)))
-    differ = lambda a, b: runs[a][1] != runs[b][1] and runs[a][2] != runs[b][2]
-    c += [("TRUMPET has its own picture and voice", differ("piano", "trumpet"), ""),
-          ("BELLS has its own picture and voice", differ("trumpet", "bells"), ""),
-          ("SOUND moves to another trumpet voice", differ("trumpet", "trumpet-2"), "")]
+    def differ(label, a, b):
+        sound, screen = runs[a][1] != runs[b][1], runs[a][2] != runs[b][2]
+        return (label, sound and screen, f"sound {'differs' if sound else 'same'}, screen {'differs' if screen else 'same'} vs {a}")
+    c += [differ("TRUMPET has its own picture and voice", "piano", "trumpet"),
+          differ("BELLS has its own picture and voice", "trumpet", "bells"),
+          differ("SOUND moves to another trumpet voice", "trumpet", "trumpet-2")]
     results[name] = c
     # Autosave: make a pattern, leave it alone, then power off and on: it is still there.
     name = "autosave"
