@@ -9,7 +9,7 @@
  *   ALGORITHM knob   change the chosen instrument: 15 to pick from (piano,
  *                    organ, trumpet, flute, violin, choir, bells, xylophone,
  *                    guitar, bass, robot, dream, game, fun, drums)
- *   piano keys       play it; melodic tracks use "happy keys" (pentatonic)
+ *   piano keys       play it; melodic tracks snap to the scale (HAPPY to start)
  *   SEQ              BEAT mode: white keys switch steps on/off,
  *                    black keys pick the drum (or note) to place
  *   HOME             back to PLAY mode
@@ -23,7 +23,9 @@
  *                    LENGTH (gate 25..100%), SWING (0..50%); it follows SPEED
  *   SEL              quiet / unquiet this instrument (SCL in the code)
  *   EDIT             sound panel: K1..K4 = REVERB, ECHO, LONG (how long notes
- *                    ring), ROOM (reverb size, shared); EDIT again closes it
+ *                    ring), ROOM (reverb size, shared); EDIT again: KEYS,
+ *                    K1 SCALE (HAPPY, SAD, DO RE MI, SPOOKY, DREAMY, ALL KEYS),
+ *                    K2 CHORDS (one key plays a chord); EDIT again closes
  *   ENV              songs: turn SELECT to choose MY SONG or one of 16 demo
  *                    songs, PLAY loads it (sounds and patterns) and plays;
  *                    a demo's changes are kept in the last project slot
@@ -53,8 +55,17 @@ static const uint16_t kid_colors[8] = {RGB(255, 80, 80), RGB(255, 160, 40), RGB(
 static const uint8_t white_keys[16] = {0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26};
 static const uint8_t black_keys[11] = {1, 3, 5, 8, 10, 13, 15, 17, 20, 22, 25};
 /* Happy keys: every pitch snaps down to C major pentatonic, so nothing clashes. */
-static const uint8_t happy[12] = {0, 0, 2, 2, 4, 4, 4, 7, 7, 9, 9, 9};
-static const uint8_t happy_notes[11] = {60, 62, 64, 67, 69, 72, 74, 76, 79, 81, 84};
+/* Scales: the keys snap down to the scale's notes, so every key sounds good.
+ * Chords stack every other note of the scale's 7-note family (its parent). */
+enum { SCALES = 6 };
+static const struct { const char *name; uint16_t notes, parent; } scales[SCALES] = {
+    {"HAPPY",    0x295, 0xab5},   /* major pentatonic C D E G A; parent C major */
+    {"SAD",      0x4a9, 0x5ad},   /* minor pentatonic C Eb F G Bb; parent C minor */
+    {"DO RE MI", 0xab5, 0xab5},   /* major */
+    {"SPOOKY",   0x5b3, 0x5b3},   /* C Db E F G Ab Bb */
+    {"DREAMY",   0x555, 0x555},   /* whole tone */
+    {"ALL KEYS", 0xfff, 0xab5}};  /* every key as it is; chords from C major */
+static unsigned scale, chords;     /* EDIT page 2: the keys' scale, one-key chords */
 /* Kid instruments: what the picker offers and the tiles show. Several use the
  * DX7 engine with a chosen factory voice; the others are whole engines. */
 enum { I_PIANO, I_ORGAN, I_TRUMPET, I_FLUTE, I_VIOLIN, I_CHOIR, I_BELLS, I_XYLO,
@@ -127,7 +138,7 @@ static uint32_t previous_buttons, previous_keys, notice_until, confirm_until;
 static uint32_t booted_at, input_at, save_tried_at, warned_at, picked_at;
 static const char *notice;
 static uint16_t notice_color;
-static uint8_t key_note[27], key_track[27];
+static uint8_t key_note[27], key_track[27], key_chord[27][2];   /* key_chord: extra chord notes */
 static uint32_t shown[E_COUNT], led_keys, led_buttons;
 static struct groove_view view;   /* the current track, refreshed every poll */
 static struct fm1_ble_status ble;
@@ -275,6 +286,7 @@ static unsigned program_of(unsigned t)
     return v.program;
 }
 static void release_keys(void);
+static unsigned chord_notes(unsigned root, uint8_t out[3]);
 static unsigned current_song(void);
 static void draw_songs(void);
 static int sound_values(int out[4]);
@@ -320,13 +332,23 @@ static void next_voice(int steps)
         }
     }
 }
+/* Let go of one key's note and its chord notes; 0 when the queue is full. */
+static int key_off(unsigned key)
+{
+    uint8_t status = (uint8_t)(0x80 + groove_midi_input_channel(key_track[key]));
+    for (unsigned i = 0; i < 2; ++i)
+        if (key_chord[key][i] != 0xff) {
+            if (!post(status, key_chord[key][i], 0, 3)) return 0;
+            key_chord[key][i] = 0xff;
+        }
+    if (!post(status, key_note[key], 0, 3)) return 0;
+    key_note[key] = 0xff;
+    return 1;
+}
 static void release_keys(void)
 {
     for (unsigned key = 0; key < 27; ++key)
-        if (key_note[key] != 0xff) {
-            if (!post((uint8_t)(0x80 + groove_midi_input_channel(key_track[key])), key_note[key], 0, 3)) return;
-            key_note[key] = 0xff;
-        }
+        if (key_note[key] != 0xff && !key_off(key)) return;
 }
 static unsigned step_on(unsigned t, unsigned step)
 {
@@ -338,14 +360,42 @@ static void toggle_step(unsigned step)
 {
     unsigned on = step_on(track, step);
     unsigned note = drum_track(track) ? groove_pad_note(track, drum) : beat_note;
-    groove_sequence_edit(track, step, note, on ? 0 : 100);
+    uint8_t notes[3];
+    if (!on && chords && !drum_track(track)) groove_sequence_chord(track, step, notes, chord_notes(note, notes), 100);
+    else groove_sequence_edit(track, step, note, on ? 0 : 100);
 }
-/* What a key plays on this track: drums keep their pad layout; tunes use happy keys. */
+/* The scale note at or below a pitch. */
+static unsigned snap(unsigned note, uint16_t set)
+{
+    unsigned pc = note % 12U, base = note - pc;
+    while (!((set >> pc) & 1U)) { if (!pc) { pc = 12; base -= 12U; } --pc; }
+    return base + pc;
+}
+/* The n-th scale note from middle C up (for BEAT's black keys). */
+static unsigned scale_note(unsigned n)
+{
+    unsigned note = 60;
+    for (;; ++note)
+        if ((scales[scale].notes >> (note % 12U)) & 1U) { if (!n) return note; --n; }
+}
+/* A chord on a root: the next-but-one and the one after that in the parent scale. */
+static unsigned chord_notes(unsigned root, uint8_t out[3])
+{
+    uint16_t set = scales[scale].parent;
+    unsigned n = 0, note = root;
+    out[n++] = (uint8_t)root;
+    for (unsigned skip = 0; n < 3 && note < 127;) {
+        ++note;
+        if ((set >> (note % 12U)) & 1U && ++skip % 2U == 0) out[n++] = (uint8_t)note;
+    }
+    return n;
+}
+/* What a key plays on this track: drums keep their pad layout; tunes snap to the scale. */
 static unsigned key_pitch(unsigned key)
 {
     unsigned note = groove_key_note(track, key, octave);
     if (note >= 128 || drum_track(track)) return note;
-    return note - note % 12U + happy[note % 12U];
+    return snap(note, scales[scale].notes);
 }
 /* BRIGHT: the setting that brightens each engine most; DX7 uses feedback. */
 struct bright { unsigned fm, part, param, max; };
@@ -549,6 +599,7 @@ static uint32_t signature(unsigned e)
         if (notice) return 0x80000000U | ((uint32_t)(uintptr_t)notice & 0x3fffffffU);
         if (songs_panel)
             return 0x70000000U | song_pick << 8 | current_song() << 16 | playing;
+        if (sound_panel == 2) return 0x58000000U | scale << 4 | chords;
         if (sound_panel) {
             int v[4];
             sound_values(v);
@@ -658,7 +709,7 @@ static void draw_sound(void)
     int v[4];
     sound_values(v);
     text(4, 193, "SOUND EDIT", 1, kid_colors[4]);
-    text(150, 193, "EDIT: DONE", 1, OFF4);
+    text(144, 193, "EDIT: KEYS", 1, OFF4);
     for (unsigned k = 0; k < 4; ++k) {
         unsigned x = k * 60U;
         text_center(x, 60, 205, labels[k], 1, SOFT);
@@ -666,6 +717,16 @@ static void draw_sound(void)
         fill(x + 8, 220, 44, 10, OFF);
         fill(x + 8, 220, (unsigned)v[k] * 44U / 100U, 10, kid_colors[k * 2U % 8U]);
     }
+}
+/* EDIT twice: SCALE on K1, CHORDS on K2. */
+static void draw_keys(void)
+{
+    text(4, 193, "KEYS", 1, kid_colors[2]);
+    text(150, 193, "EDIT: DONE", 1, OFF4);
+    text_center(0, 120, 205, "SCALE", 1, SOFT);
+    text_center(0, 120, 217, scales[scale].name, 2, kid_colors[scale]);
+    text_center(120, 120, 205, "CHORDS", 1, SOFT);
+    text_center(120, 120, 217, chords ? "ON" : "OFF", 2, chords ? GO : OFF4);
 }
 static void draw_foot(void)
 {
@@ -679,6 +740,7 @@ static void draw_foot(void)
     if (arp_panel) { draw_arp(); return; }
     if (notice) { text_center(0, 240, 204, notice, 3, notice_color); return; }
     if (songs_panel) { draw_songs(); return; }
+    if (sound_panel == 2) { draw_keys(); return; }
     if (sound_panel) { draw_sound(); return; }
     static const char *const labels[4] = {"LOUD", "BRIGHT", "SOUND", "SPEED"};
     for (unsigned k = 0; k < 4; ++k) {
@@ -904,10 +966,12 @@ void groove_screen_init(void)
     sound_panel = 0;
     tidy_pending = 1;
     songs_panel = song_pick = 0;
+    scale = chords = 0;
     memset(knob_dir, 0, sizeof knob_dir); memset(knob_speed, 0, sizeof knob_speed); memset(knob_at, 0, sizeof knob_at);
     arp_down_at = 0; arp_long = arp_turned = arp_panel = 0;
     battery_avg = 0; battery_level = 3; on_usb = blink = 0;
     memset(key_note, 0xff, sizeof key_note);
+    memset(key_chord, 0xff, sizeof key_chord);
     memset(shown, 0xff, sizeof shown);
     memset(paint_left, 0, sizeof paint_left);
     memset(paint_right, FM1_SCREEN_WIDTH, sizeof paint_right);   /* paint everything once */
@@ -946,6 +1010,7 @@ void groove_screen_control(void)
         if (!post(0xff, 0, 0, 1)) return;
         retry_reset = 0;
         memset(key_note, 0xff, sizeof key_note);
+        memset(key_chord, 0xff, sizeof key_chord);
     }
     battery_poll(c.battery, now);
     /* Every track loops one row of keys. */
@@ -986,6 +1051,9 @@ void groove_screen_control(void)
         static const uint8_t setting[4] = {0, 2, 3, 4};   /* rate, range, gate, swing */
         for (unsigned k = 0; k < 4; ++k)
             if (c.encoders[2 + k]) { groove_arp_edit(track, setting[k], c.encoders[2 + k]); arp_turned = 1; }
+    } else if (sound_panel == 2) {                     /* EDIT twice: the keys */
+        if (c.encoders[2]) { release_keys(); scale = (unsigned)((int)(scale + SCALES) + c.encoders[2] % SCALES) % SCALES; }
+        if (c.encoders[3]) { release_keys(); chords = c.encoders[3] > 0; }
     } else if (sound_panel) {                          /* EDIT: the sound panel */
         if (c.encoders[2]) groove_sends_edit(track, 0, c.encoders[2]);
         if (c.encoders[3]) groove_sends_edit(track, 1, c.encoders[3]);
@@ -1067,7 +1135,7 @@ void groove_screen_control(void)
         int failed = groove_project_save_slot(groove_project_slot());
         say(failed ? "OOPS" : "SAVED!", failed ? STOP : GO, now);
     }
-    if (pressed & BUTTON(EDIT)) { sound_panel = !sound_panel; songs_panel = 0; }
+    if (pressed & BUTTON(EDIT)) { sound_panel = (sound_panel + 1U) % 3U; songs_panel = 0; }
     if (pressed & BUTTON(LFO)) say(groove_edit_undo() ? "NO UNDO" : "UNDO!", kid_colors[4], now);
     /* ARP: a tap steps UP, DOWN, BOUNCE, RANDOM, OFF; holding it toggles latch. */
     if (pressed & BUTTON(ARP)) { arp_down_at = now | 1U; arp_long = arp_turned = 0; }
@@ -1110,7 +1178,7 @@ void groove_screen_control(void)
         for (unsigned b = 0; b < 11; ++b)
             if (key_down & (1U << black_keys[b])) {
                 if (drum_track(track)) { if (b < groove_pad_count(track)) drum = b; }
-                else beat_note = (unsigned)clampi(happy_notes[b] + 12 * octave, 0, 127);
+                else beat_note = (unsigned)clampi((int)scale_note(b) + 12 * octave, 0, 127);
             }
     }
     for (unsigned key = 0; key < 27; ++key) {
@@ -1120,17 +1188,18 @@ void groove_screen_control(void)
             unsigned b = 0;
             while (b < 11 && black_keys[b] != key) ++b;
             note = b == 11 ? 128 : drum_track(track) ? (b < groove_pad_count(track) ? groove_pad_note(track, b) : 128)
-                                                     : (unsigned)clampi(happy_notes[b] + 12 * octave, 0, 127);
+                                                     : (unsigned)clampi((int)scale_note(b) + 12 * octave, 0, 127);
         }
-        if (key_note[key] != 0xff && (!held || key_track[key] != track)) {
-            if (!post((uint8_t)(0x80 + groove_midi_input_channel(key_track[key])), key_note[key], 0, 3)) break;
-            key_note[key] = 0xff;
-        }
+        if (key_note[key] != 0xff && (!held || key_track[key] != track) && !key_off(key)) break;
         if (held && key_note[key] == 0xff && note < 128) {
-            if (!post((uint8_t)(0x90 + groove_midi_input_channel(track)), (uint8_t)note, 100, 3)) break;
+            uint8_t status = (uint8_t)(0x90 + groove_midi_input_channel(track)), notes[3];
+            if (!post(status, (uint8_t)note, 100, 3)) break;
             key_note[key] = (uint8_t)note;
             key_track[key] = (uint8_t)track;
             if (!drum_track(track)) beat_note = note;
+            if (chords && !drum_track(track))
+                for (unsigned i = 1, n = chord_notes(note, notes); i < n; ++i)
+                    if (post(status, notes[i], 90, 3)) key_chord[key][i - 1] = notes[i];
         }
     }
     if (tidy_pending) tidy_tracks(now);
