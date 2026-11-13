@@ -161,7 +161,7 @@ static const struct { uint8_t move, spark; } kind_anim[I_COUNT] = {
 static struct { uint8_t note, track, kind; uint32_t at; } sparks[SPARKS];
 static unsigned spark_next;
 static uint32_t hit_at[GROOVE_TRACKS];  /* when each instrument last started a note */
-static uint8_t last_level[GROOVE_TRACKS];
+static uint8_t last_step[GROOVE_TRACKS];
 static uint32_t clock_now;          /* this tick's time, for the animations */
 static void spark(unsigned t, unsigned note, uint32_t now)
 {
@@ -839,45 +839,64 @@ static void tile_move(unsigned t, unsigned look_i, int *dx, int *dy, unsigned *l
     case M_BLINK:  *lit = (phase & 1U) == 0; break;                           /* lights flash */
     }
 }
-/* One spark, by kind; age runs 0..SPARK_MS. */
+/* One spark, by kind; age runs 0..SPARK_MS. ink stands out on the tile; tint
+ * is the note's colour, used for the small middle parts. */
 static void draw_spark(unsigned kind_s, unsigned note, uint32_t age, int x, int y, unsigned w, unsigned h, uint16_t ink)
 {
-    uint16_t nc = note_colors[note % 12U];
-    int cx = x + 28, cy = y + 24, a = (int)age, n = (int)(note % 12U);
+    uint16_t tint = note_colors[note % 12U];
+    int cx = x + 28, cy = y + 26, a = (int)age, n = (int)(note % 12U);
     switch (kind_s) {
-    case P_NOTE: {                                   /* a note floats up */
-        int nx = x + 5 + n * ((int)w - 14) / 11, ny = y + (int)h - 22 - a * ((int)h - 30) / SPARK_MS;
-        cfill(nx, ny + 5, 4, 3, ink); cfill(nx + 3, ny, 1, 5, ink); cfill(nx, ny + 5, 3, 2, nc);
+    case P_NOTE: {                                   /* a big note floats up, side to side */
+        int nx = x + 6 + n * ((int)w - 20) / 11 + ((a / 120) & 1 ? 2 : 0), ny = y + (int)h - 28 - a * ((int)h - 34) / SPARK_MS;
+        cfill(nx, ny + 9, 6, 4, ink); cfill(nx + 1, ny + 8, 4, 6, ink);    /* head */
+        cfill(nx + 4, ny, 2, 10, ink); cfill(nx + 6, ny + 1, 2, 2, ink); cfill(nx + 7, ny + 3, 2, 2, ink);  /* stem, flag */
+        cfill(nx + 2, ny + 10, 2, 2, tint);
         break;
     }
-    case P_STAR: {                                   /* a star twinkles up and out */
-        int sx = x + 6 + n * ((int)w - 16) / 11, sy = cy + 8 - a * 40 / SPARK_MS, r = (a / 80) & 1 ? 1 : 2;
-        cfill(sx - r, sy, 2 * r + 1, 1, nc); cfill(sx, sy - r, 1, 2 * r + 1, nc); cfill(sx, sy, 1, 1, ink);
+    case P_STAR: {                                   /* stars twinkle up and out */
+        for (int k = 0; k < 2; ++k) {
+            int sx = x + 8 + ((n + k * 5) % 12) * ((int)w - 18) / 11, sy = cy + 10 - a * 46 / SPARK_MS - k * 10;
+            int r = ((a / 70) + k) & 1 ? 2 : 4;
+            cfill(sx - r, sy - 1, 2 * r + 2, 2, ink); cfill(sx - 1, sy - r, 2, 2 * r + 2, ink);
+            cfill(sx - 1, sy - 1, 2, 2, tint);
+        }
         break;
     }
     case P_PIXEL: {                                  /* blocks fly out */
         static const int8_t dir[8][2] = {{3, -2}, {-3, -2}, {2, -3}, {-2, -3}, {3, 1}, {-3, 1}, {1, -3}, {-1, -3}};
-        int d = a * 7 / SPARK_MS;
-        cfill(cx + dir[n % 8][0] * d - 1, cy + dir[n % 8][1] * d - 1, 4, 4, nc);
-        cfill(cx + dir[(n + 3) % 8][0] * d, cy + dir[(n + 3) % 8][1] * d, 3, 3, ink);
+        int d = a * 8 / SPARK_MS;
+        for (int k = 0; k < 3; ++k) {
+            const int8_t *v = dir[(n + k * 3) % 8];
+            cfill(cx + v[0] * d - 3, cy + v[1] * d - 3, 6, 6, ink);
+            cfill(cx + v[0] * d - 1, cy + v[1] * d - 1, 2, 2, tint);
+        }
         break;
     }
-    case P_PUFF: {                                   /* puffs of air out the right side */
-        int px = x + 38 + a * 18 / SPARK_MS, py = y + 14 + (n % 4) * 6;
-        cfill(px, py, 6 - a * 4 / SPARK_MS, 2, nc); cfill(px + 2, py + 4, 4, 1, ink);
+    case P_PUFF: {                                   /* puffs of air blow out the right side */
+        for (int k = 0; k < 3; ++k) {
+            int px = x + 30 + a * 30 / SPARK_MS + k * 7, py = y + 10 + ((n + k) % 3) * 9 - k * 2;
+            int r = 2 + a * 3 / SPARK_MS;
+            cfill(px - r, py - 1, 2 * r + 1, 3, ink); cfill(px - 1, py - r, 3, 2 * r + 1, ink);
+        }
         break;
     }
     case P_RING: {                                   /* rings spread out */
-        int r = 4 + a * 26 / SPARK_MS;
-        cfill(cx - r, cy - r, 2 * r, 1, nc); cfill(cx - r, cy + r, 2 * r, 1, nc);
-        cfill(cx - r, cy - r, 1, 2 * r, nc); cfill(cx + r, cy - r, 1, 2 * r + 1, nc);
+        for (int k = 0; k < 2; ++k) {
+            int r = 8 + (a - k * 200) * 30 / SPARK_MS;
+            if (a < k * 200) continue;
+            cfill(cx - r, cy - r, 2 * r + 2, 2, ink); cfill(cx - r, cy + r, 2 * r + 2, 2, ink);
+            cfill(cx - r, cy - r, 2, 2 * r + 2, ink); cfill(cx + r, cy - r, 2, 2 * r + 2, ink);
+        }
         break;
     }
-    default: {                                       /* BANG: lines burst out */
-        int r = 6 + a * 18 / SPARK_MS, l = 5;
-        cfill(cx - r - l, cy, l, 2, nc); cfill(cx + r, cy, l, 2, nc);
-        cfill(cx, cy - r - l, 2, l, nc); cfill(cx, cy + r, 2, l, ink);
-        cfill(cx + r * 2 / 3, cy - r * 2 / 3, 3, 3, ink); cfill(cx - r * 2 / 3 - 3, cy - r * 2 / 3, 3, 3, nc);
+    default: {                                       /* BANG: thick lines burst out */
+        int r = 10 + a * 16 / SPARK_MS, l = 8;
+        cfill(cx - r - l, cy - 1, l, 3, ink); cfill(cx + r, cy - 1, l, 3, ink);
+        cfill(cx - 1, cy - r - l, 3, l, ink); cfill(cx - 1, cy + r, 3, l, ink);
+        int d = r * 3 / 4;
+        cfill(cx + d, cy - d - 3, 4, 4, ink); cfill(cx - d - 4, cy - d - 3, 4, 4, ink);
+        cfill(cx + d, cy + d, 4, 4, ink); cfill(cx - d - 4, cy + d, 4, 4, ink);
+        cfill(cx + d + 1, cy - d - 2, 2, 2, tint);
         break;
     }
     }
@@ -1372,18 +1391,17 @@ void groove_screen_control(void)
                     if (post(status, notes[i], 90, 3)) key_chord[key][i - 1] = notes[i];
         }
     }
-    /* The song playing makes the pictures move too: a jump in loudness is a new note. */
+    /* The song playing makes the pictures move too: each step with a note in it. */
     if (mode == KID_PLAY)
         for (unsigned t = 0; t < GROOVE_TRACKS; ++t) {
             struct groove_view v;
             groove_get_view(t, 0, &v);
-            unsigned lvl = v.audible && !v.muted ? v.level : 0;
-            if (lvl > last_level[t] + 24U && (!hit_at[t] || since(now, hit_at[t]) > 120)) {
-                struct groove_view sv;
-                groove_get_view(t, v.play_step, &sv);
-                spark(t, sv.step.velocity ? sv.step.note : 60U + t * 5U, now);
-            }
-            last_level[t] = (uint8_t)lvl;
+            if (!v.playing || v.muted) { last_step[t] = 0xff; continue; }
+            if (v.play_step == last_step[t]) continue;
+            last_step[t] = (uint8_t)v.play_step;
+            struct groove_view sv;
+            groove_get_view(t, v.play_step, &sv);
+            if (sv.step.velocity || sv.step.drums) spark(t, sv.step.velocity ? sv.step.note : 60U + t * 5U, now);
         }
     if (tidy_pending) tidy_tracks(now);
     autosave(now);

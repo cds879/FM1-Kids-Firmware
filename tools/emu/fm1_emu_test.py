@@ -350,12 +350,12 @@ def kid_checks(emu, fwsc, out):
         for ms in (2900, 3000, 3100, 3200, 3300, 3400, 3600):
             try:
                 row.append(crop(read_ppm(out / f"{name}-{label}" / "frames" / f"{ms // 100:06d}.ppm"),
-                                (LCD[0] + 8, LCD[1] + 92, 110, 136)))
+                                (LCD[0], LCD[1] + 80, 130, 160)))
             except (FileNotFoundError, IndexError):
-                row.append((110, 136, b"\0" * 110 * 136 * 3))
+                row.append((130, 160, b"\0" * 130 * 160 * 3))
         rows.append(row)
-    sw, sh = 110 * 7, 136 * len(rows)
-    px = b"".join(b"".join(cell[2][r * 330:(r + 1) * 330] for cell in row) for row in rows for r in range(136))
+    sw, sh = 130 * 7, 160 * len(rows)
+    px = b"".join(b"".join(cell[2][r * 390:(r + 1) * 390] for cell in row) for row in rows for r in range(160))
     write_png(out / "sparks-gallery.png", (sw, sh, px))
     import base64
     print("GALLERY-PNG-BEGIN")
