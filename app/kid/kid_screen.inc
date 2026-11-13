@@ -31,6 +31,8 @@
  *   ENV              songs: turn SELECT to choose MY SONG or one of 16 demo
  *                    songs, PLAY loads it (sounds and patterns) and plays;
  *                    a demo's changes are kept in the last project slot
+ *                    after the demos: PLAY ALONG tunes; the next key to press
+ *                    lights up and the screen shows the next note; HOME stops
  *   LFO              undo              SAVE  save now (it also saves by itself)
  *   FX, then FX      start this instrument over (LFO brings it back)
  *   OCT- / OCT+      lower / higher
@@ -187,7 +189,22 @@ static unsigned pick_kind, picking;   /* ALGORITHM: the instrument being chosen 
 static unsigned tidy_pending;         /* boot: give empty tracks their kid sound */
 static unsigned songs_panel, song_pick; /* ENV: MY SONG and the 16 demo songs */
 static unsigned my_slot;              /* the kid's own song; demos are kept in DEMO_SLOT */
-enum { DEMO_SLOT = GROOVE_PROJECT_SLOTS - 1, SONGS = 1 + GROOVE_FACTORY_PROJECTS };
+/* Tunes to learn: the next key to press lights up. Old folk tunes, all in C. */
+enum { TUNES = 8 };
+static const struct { const char *name; uint8_t notes[56]; } tunes[TUNES] = {
+    {"TWINKLE", {60,60,67,67,69,69,67, 65,65,64,64,62,62,60, 67,67,65,65,64,64,62, 67,67,65,65,64,64,62,
+                 60,60,67,67,69,69,67, 65,65,64,64,62,62,60}},
+    {"MARY LAMB", {64,62,60,62,64,64,64, 62,62,62, 64,67,67, 64,62,60,62,64,64,64,64,62,62,64,62,60}},
+    {"BIRTHDAY", {55,55,57,55,60,59, 55,55,57,55,62,60, 55,55,67,64,60,59,57, 65,65,64,60,62,60}},
+    {"ODE TO JOY", {64,64,65,67,67,65,64,62,60,60,62,64,64,62,62, 64,64,65,67,67,65,64,62,60,60,62,64,62,60,60}},
+    {"HOT BUNS", {64,62,60, 64,62,60, 60,60,60,60,62,62,62,62, 64,62,60}},
+    {"JINGLE", {64,64,64, 64,64,64, 64,67,60,62,64, 65,65,65,65,65,64,64,64,64,62,62,64,62,67,
+                64,64,64, 64,64,64, 64,67,60,62,64, 65,65,65,65,65,64,64,64,67,67,65,62,60}},
+    {"ROW BOAT", {60,60,60,62,64, 64,62,64,65,67, 72,72,72,67,67,67,64,64,64,60,60,60, 67,65,64,62,60}},
+    {"MACDONALD", {60,60,60,55,57,57,55, 64,64,62,62,60, 55,60,60,60,55,57,57,55, 64,64,62,62,60}}};
+enum { DEMO_SLOT = GROOVE_PROJECT_SLOTS - 1, SONGS = 1 + GROOVE_FACTORY_PROJECTS + TUNES };
+static unsigned learn, learn_pos, learn_key = 0xff, learn_scale, learn_chords;   /* learn: tune + 1 */
+static uint32_t learn_done_at;
 static unsigned sound_panel;          /* EDIT: REVERB, ECHO, LONG and ROOM on K1..K4 */
 static int8_t knob_dir[7];            /* knob acceleration: turning fast takes bigger steps */
 static uint8_t knob_speed[7];
@@ -327,6 +344,7 @@ static void release_keys(void);
 static unsigned chord_notes(unsigned root, uint8_t out[3]);
 static unsigned current_song(void);
 static void draw_songs(void);
+static void draw_learn(void);
 static int sound_values(int out[4]);
 /* The DX7 voice of instrument i nearest p, searching one way (0x100: none). */
 static unsigned dx7_voice(unsigned i, int p, int dir)
@@ -638,6 +656,7 @@ static uint32_t signature(unsigned e)
         if (notice) return 0x80000000U | ((uint32_t)(uintptr_t)notice & 0x3fffffffU);
         if (songs_panel)
             return 0x70000000U | song_pick << 8 | current_song() << 16 | playing;
+        if (learn) return 0x68000000U | learn << 16 | learn_pos << 4 | (learn_done_at != 0);
         if (sound_panel == 2) return 0x58000000U | scale << 4 | chords;
         if (sound_panel) {
             int v[4];
@@ -788,6 +807,7 @@ static void draw_foot(void)
     if (arp_panel) { draw_arp(); return; }
     if (notice) { text_center(0, 240, 204, notice, 3, notice_color); return; }
     if (songs_panel) { draw_songs(); return; }
+    if (learn) { draw_learn(); return; }
     if (sound_panel == 2) { draw_keys(); return; }
     if (sound_panel) { draw_sound(); return; }
     static const char *const labels[4] = {"LOUD", "BRIGHT", "SOUND", "SPEED"};
@@ -1024,6 +1044,7 @@ static void leds(void)
                 keys |= 1U << white_keys[i];
         if (drum_track(track) && drum < 11) keys |= 1U << black_keys[drum];
     } else keys = previous_keys;
+    if (learn && learn_key < 27 && !learn_done_at && mode == KID_PLAY) keys |= 1U << learn_key;  /* press me */
     buttons |= playing ? BUTTON(PLAY) : 0;
     buttons |= recording ? BUTTON(REC) : 0;
     buttons |= mode == KID_BEAT ? BUTTON(SEQ) : BUTTON(HOME);
@@ -1102,13 +1123,66 @@ static void draw_songs(void)
     unsigned n = song_pick + 1U, i = 0;
     if (n >= 10) count[i++] = (char)('0' + n / 10U);
     count[i++] = (char)('0' + n % 10U); count[i++] = '/';
-    count[i++] = '1'; count[i++] = '7'; count[i] = 0;
+    count[i++] = (char)('0' + SONGS / 10U); count[i++] = (char)('0' + SONGS % 10U); count[i] = 0;
+    if (song_pick > GROOVE_FACTORY_PROJECTS) {         /* a tune to learn */
+        text(4, 193, "PLAY ALONG", 1, kid_colors[4]);
+        text(200, 193, count, 1, OFF4);
+        text(4, 207, "<", 2, SOFT);
+        text(226, 207, ">", 2, SOFT);
+        text_center(0, 240, 207, tunes[song_pick - 1U - GROOVE_FACTORY_PROJECTS].name, 2, INK);
+        text_center(0, 240, 225, "PLAY = LEARN IT", 1, OFF4);
+        return;
+    }
     text(4, 193, "SONGS", 1, kid_colors[6]);
     text(200, 193, count, 1, OFF4);
     text(4, 207, "<", 2, SOFT);
     text(226, 207, ">", 2, SOFT);
     text_center(0, 240, 207, song_name(song_pick), 2, song_pick == current_song() ? GO : INK);
     text_center(0, 240, 225, song_pick == current_song() ? "PLAY = PLAY   ENV = DONE" : "PLAY = LOAD AND PLAY", 1, OFF4);
+}
+
+/* Learning a tune: find the key for the next note, lighting it up. */
+static unsigned learn_note(void) { return tunes[learn - 1U].notes[learn_pos]; }
+static void learn_find_key(void)
+{
+    learn_key = 0xff;
+    if (!learn || !learn_note()) return;
+    for (unsigned k = 0; k < 27; ++k)
+        if (groove_key_note(track, k, octave) == learn_note()) { learn_key = k; return; }
+}
+static void learn_stop(void)
+{
+    if (!learn) return;
+    learn = 0; learn_key = 0xff;
+    scale = learn_scale; chords = learn_chords;
+}
+static void learn_start(unsigned tune)
+{
+    release_keys();
+    if (!learn) { learn_scale = scale; learn_chords = chords; }
+    learn = tune + 1U; learn_pos = 0; learn_done_at = 0;
+    scale = 2; chords = 0;                              /* DO RE MI: every white key as it is */
+    if (drum_track(track))                             /* tunes need a melody instrument */
+        for (unsigned t = 0; t < GROOVE_TRACKS; ++t) if (!drum_track(t)) { track = t; break; }
+    octave = 0;                                        /* the tunes fit the keys at the middle octave */
+    learn_find_key();
+}
+/* PLAY ALONG: the tune, how far along, and the next note big in its colour. */
+static void draw_learn(void)
+{
+    static const char *const names[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+    unsigned total = 0;
+    while (total < sizeof tunes[0].notes && tunes[learn - 1U].notes[total]) ++total;
+    text(4, 193, tunes[learn - 1U].name, 1, kid_colors[4]);
+    text(166, 193, "HOME: STOP", 1, OFF4);
+    fill(4, 204, 232, 4, OFF);
+    fill(4, 204, 232U * learn_pos / total, 4, GO);
+    if (learn_done_at) { text_center(0, 240, 214, "YAY! YOU DID IT!", 2, GO); return; }
+    unsigned n = learn_note();
+    text(8, 214, "NEXT:", 2, SOFT);
+    text(80, 214, names[n % 12U], 2, note_colors[n % 12U]);
+    for (unsigned k = 1; k < 5 && learn_pos + k < total; ++k)  /* the notes after, smaller */
+        text(110 + k * 22U, 218, names[tunes[learn - 1U].notes[learn_pos + k] % 12U], 1, OFF4);
 }
 
 /* A new part: every track's previous part copied in, ready to change. */
@@ -1133,6 +1207,7 @@ void groove_screen_init(void)
     tidy_pending = 1;
     songs_panel = song_pick = 0;
     scale = chords = 0;
+    learn = learn_pos = 0; learn_key = 0xff; learn_done_at = 0;
     part = 0; song_parts = 1; part_at = 0;
     memset(knob_dir, 0, sizeof knob_dir); memset(knob_speed, 0, sizeof knob_speed); memset(knob_at, 0, sizeof knob_at);
     arp_down_at = 0; arp_long = arp_turned = arp_panel = 0;
@@ -1290,10 +1365,16 @@ void groove_screen_control(void)
         confirm_until = (now + 4000U) | 1U;
         pressed &= ~BUTTON(FX);
     }
-    if (pressed & BUTTON(HOME)) { mode = KID_PLAY; sound_panel = songs_panel = 0; }
+    if (pressed & BUTTON(HOME)) { mode = KID_PLAY; sound_panel = songs_panel = 0; learn_stop(); }
     if (pressed & BUTTON(ENV)) {
         songs_panel = !songs_panel;
         if (songs_panel) { song_pick = current_song(); sound_panel = 0; }
+    }
+    if ((pressed & BUTTON(PLAY)) && songs_panel && song_pick > GROOVE_FACTORY_PROJECTS) {
+        pressed &= ~BUTTON(PLAY);
+        songs_panel = 0; mode = KID_PLAY;
+        learn_start(song_pick - 1U - GROOVE_FACTORY_PROJECTS);
+        say(tunes[learn - 1U].name, kid_colors[4], now);
     }
     if ((pressed & BUTTON(PLAY)) && songs_panel && song_pick != current_song()) {
         int r = load_song(song_pick);
@@ -1384,6 +1465,11 @@ void groove_screen_control(void)
             key_note[key] = (uint8_t)note;
             key_track[key] = (uint8_t)track;
             if (!drum_track(track)) beat_note = note;
+            if (learn && !learn_done_at && note == learn_note()) {   /* the right key: on to the next */
+                ++learn_pos;
+                if (learn_pos >= sizeof tunes[0].notes || !learn_note()) learn_done_at = now | 1U;
+                learn_find_key();
+            }
             if (mode == KID_PLAY) {
                 spark(track, note, now);
             }
@@ -1404,6 +1490,10 @@ void groove_screen_control(void)
             groove_get_view(t, v.play_step, &sv);
             if (sv.step.velocity || sv.step.drums) spark(t, sv.step.velocity ? sv.step.note : 60U + t * 5U, now);
         }
+    if (learn) {
+        if (learn_done_at && since(now, learn_done_at) > 4000) learn_stop();
+        else learn_find_key();                             /* follows octave and instrument changes */
+    }
     if (tidy_pending) tidy_tracks(now);
     autosave(now);
     previous_buttons = c.buttons;
