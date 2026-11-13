@@ -60,6 +60,10 @@ static const uint8_t black_keys[11] = {1, 3, 5, 8, 10, 13, 15, 17, 20, 22, 25};
 /* Scales: the keys snap down to the scale's notes, so every key sounds good.
  * Chords stack every other note of the scale's 7-note family (its parent). */
 enum { SCALES = 6 };
+/* Melody notes take the colour of their pitch and sit higher when higher. */
+static const uint16_t note_colors[12] = {RGB(255, 80, 80), RGB(255, 80, 80), RGB(255, 160, 40), RGB(255, 160, 40),
+                                         RGB(250, 220, 40), RGB(250, 220, 40), RGB(80, 210, 90), RGB(80, 210, 90),
+                                         RGB(40, 200, 220), RGB(70, 120, 255), RGB(70, 120, 255), RGB(170, 90, 240)};
 static const struct { const char *name; uint16_t notes, parent; } scales[SCALES] = {
     {"HAPPY",    0x295, 0xab5},   /* major pentatonic C D E G A; parent C major */
     {"SAD",      0x4a9, 0x5ad},   /* minor pentatonic C Eb F G Bb; parent C minor */
@@ -139,6 +143,11 @@ static unsigned beat_note = 60;
  * BEAT shows and edits one part; ALGORITHM chooses it. */
 enum { PARTS = 4 };
 static unsigned part, song_parts = 1;
+/* Note sparks: each key played sends a little note floating up its tile. */
+enum { SPARKS = 6, SPARK_MS = 700 };
+static struct { uint8_t note, track; uint32_t at; } sparks[SPARKS];
+static unsigned spark_next;
+static uint32_t clock_now;          /* this tick's time, for the animations */
 static uint32_t part_at;
 static int octave;
 static uint32_t previous_buttons, previous_keys, notice_until, confirm_until;
@@ -624,9 +633,14 @@ static uint32_t signature(unsigned e)
         groove_get_view(i, 0, &v);
         unsigned sounding = 0;
         for (unsigned k = 0; k < 27; ++k) sounding |= key_note[k] != 0xff && key_track[k] == i;
-        return (i == track) | (uint32_t)v.muted << 4 | sounding << 5 | 1U << 6 |
-               (uint32_t)(picking && i == track) << 7 | groove_arp_enabled(i) << 8 | groove_arp_setting(i, 5) << 9 |
-               shown_kind(i) << 10;
+        uint32_t s = (i == track) | (uint32_t)v.muted << 4 | sounding << 5 | 1U << 6 |
+                     (uint32_t)(picking && i == track) << 7 | groove_arp_enabled(i) << 8 |
+                     groove_arp_setting(i, 5) << 9 | shown_kind(i) << 10;
+        s = mix(s, v.audible ? v.level / 8U + 1U : 0);
+        for (unsigned k = 0; k < SPARKS; ++k)
+            if (sparks[k].at && sparks[k].track == i && clock_now - sparks[k].at < SPARK_MS)
+                s = mix(mix(s, sparks[k].note), (clock_now - sparks[k].at) / 25U + 1U);
+        return s;
     }
     if (i == 16)
         return mix(base | drum << 4 | beat_note << 8 | look(track) << 16,
@@ -782,7 +796,18 @@ static void draw_tile(unsigned i, unsigned x, unsigned y, unsigned w, unsigned h
     unsigned selected = i == track;
     fill(x, y, w, h, v.muted ? OFF : selected ? c : dim(c));
     if (selected) frame(x, y, w, h, 3, picking ? kid_colors[2] : INK);
-    picture(x + 4, y + 6, shown_kind(i), 0, v.muted ? OFF4 : selected ? INK : SOFT);
+    unsigned level = v.audible && !v.muted ? v.level : 0;
+    unsigned bounce = level > 70 ? 3U : level > 35 ? 1U : 0U;   /* the picture dances to its sound */
+    picture(x + 4, y + 6 - bounce, shown_kind(i), 0, v.muted ? OFF4 : selected ? INK : SOFT);
+    if (level) fill(x + 4, y + h - 5, (w - 8) * level / 127U, 2, selected ? BG : INK);   /* how loud */
+    for (unsigned k = 0; k < SPARKS; ++k) {            /* notes floating up */
+        uint32_t age = clock_now - sparks[k].at;
+        if (!sparks[k].at || sparks[k].track != i || age >= SPARK_MS) continue;
+        unsigned nx = x + 5 + (sparks[k].note % 12U) * (w - 14) / 11U, ny = y + h - 22 - age * (h - 30) / SPARK_MS;
+        uint16_t nc = note_colors[sparks[k].note % 12U];
+        fill(nx, ny + 5, 4, 3, INK); fill(nx + 1, ny + 4, 3, 1, nc); fill(nx + 3, ny, 1, 5, INK);   /* a note */
+        fill(nx, ny + 5, 3, 2, nc);
+    }
     text_center(x, w, y + h - 16, v.muted ? "QUIET" : kind_name[shown_kind(i)], 1,
                 v.muted ? SOFT : selected ? BG : INK);
     for (unsigned k = 0; k < 27; ++k)
@@ -816,10 +841,6 @@ static void draw_pick(void)
     }
     text(44, 73, "PART", 1, OFF4);
 }
-/* Melody notes take the colour of their pitch and sit higher when higher. */
-static const uint16_t note_colors[12] = {RGB(255, 80, 80), RGB(255, 80, 80), RGB(255, 160, 40), RGB(255, 160, 40),
-                                         RGB(250, 220, 40), RGB(250, 220, 40), RGB(80, 210, 90), RGB(80, 210, 90),
-                                         RGB(40, 200, 220), RGB(70, 120, 255), RGB(70, 120, 255), RGB(170, 90, 240)};
 static void draw_cell(unsigned i, unsigned x, unsigned y, unsigned w, unsigned h)
 {
     i += part * KID_STEPS;
@@ -1031,6 +1052,7 @@ void groove_screen_control(void)
     struct fm1_controls c;
     fm1_controls_read(&c);
     uint32_t now = fm1_millis();
+    clock_now = now;
     knobs_read(&c, now);
     groove_master_update(c.knob < KID_MASTER_LIMIT ? c.knob : KID_MASTER_LIMIT);
     uint32_t pressed = c.buttons & ~previous_buttons;
@@ -1249,6 +1271,11 @@ void groove_screen_control(void)
             key_note[key] = (uint8_t)note;
             key_track[key] = (uint8_t)track;
             if (!drum_track(track)) beat_note = note;
+            if (mode == KID_PLAY) {
+                sparks[spark_next].note = (uint8_t)note; sparks[spark_next].track = (uint8_t)track;
+                sparks[spark_next].at = now | 1U;
+                spark_next = (spark_next + 1U) % SPARKS;
+            }
             if (chords && !drum_track(track))
                 for (unsigned i = 1, n = chord_notes(note, notes); i < n; ++i)
                     if (post(status, notes[i], 90, 3)) key_chord[key][i - 1] = notes[i];
