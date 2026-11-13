@@ -19,6 +19,7 @@ M-VAVE's, unchanged.
 | **ARP** | Arpeggiator. Tap: UP, DOWN, BOUNCE (up and down), RANDOM, OFF. Hold about a second: HOLD (notes keep going after the keys are let go). Hold and turn KNOB 1–4: FAST (1/4, 1/8, 1/16, 1/32 of a beat), OCTAVES (1–4), LENGTH (25–100%), SWING (0–50%). It follows SPEED. On drums it repeats the drum |
 | **SEL** | Quiet / unquiet the chosen instrument |
 | **EDIT** | Sound panel for the chosen instrument: KNOB 1–4 are REVERB, ECHO, LONG (how long notes ring after the key is let go) and ROOM (reverb size, shared by all instruments). EDIT again (or HOME) closes it |
+| **ENV** | Songs. Turn SELECT to choose MY SONG or one of the 16 demo songs, then press PLAY to load it (its instruments and patterns) and play. Everything in a demo can be changed. ENV again closes the list |
 | **LFO** | Undo |
 | **SAVE** | Save now. The song also saves by itself once it has been left alone for a few seconds while stopped |
 | **FX**, then **FX** | Start the chosen instrument over (LFO brings it back) |
@@ -100,3 +101,16 @@ always matches what is playing (`voice_look`):
 | CHOIR | the 8 voices |
 | BELLS | FROGBELL, ELECT.GONG, TIBET, COWBELL, FINGERCYM, CLANG BELL, BI BEN, GAMALONG, TUB BELLS |
 | XYLOPHONE | BLOCK, LOG DRUM, TIMPANI, STEEL DRUM, CONGA, KALIMBA, TOM TOMS, TIMBALI |
+
+## Songs
+
+ENV opens the song list: MY SONG and M-VAVE's 16 demo songs (NEON KEYS,
+ACID ALLEY, CHIP PARADE, ...). PLAY loads the chosen one and starts it.
+
+- MY SONG is the project slot the FM-1 started on (usually the first). It is
+  saved before a demo loads, so it always comes back.
+- A loaded demo is kept in the last project slot (16), so changes to it are
+  saved too. Loading another demo replaces it. If slot 16 holds a project
+  made with another firmware, the kid UI says SLOT 16 BUSY and leaves it alone.
+- Demo patterns are four bars long and keep their length; BEAT mode shows and
+  edits the first bar. Tracks the kid fills in loop one row of keys as before.
