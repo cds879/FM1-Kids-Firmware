@@ -1,66 +1,114 @@
-# FM1 Open V14
+# FM1 Kids
 
-English · [简体中文](README.zh-CN.md)
+A simple firmware for the [M-VAVE FM-1](https://www.m-vave.com/) pocket
+synthesizer, made for young children. Big pictures instead of menus, keys that
+always sound good, a drum machine on the white keys, and nothing a child can
+break. It is built on M-VAVE's open-source
+[FM1 Open](https://github.com/m-vave/fm1_open) firmware and keeps all of its
+sound engines.
 
-8 tracks, 8 sample slots, 16 FX demos; binary SDK included.
+**[Install it from the browser](https://cds879.github.io/FM1-Kids-Firmware/)**
+(Chrome or Edge, USB-C cable) · [Flashing guide](docs/FLASHING.md) ·
+[Controls](app/kid/README.md)
 
-[Workbench and development kit](https://open.m-vave.com/fm1-workbench) · [Official forum](https://forum.m-vave.com)
+![FM1 Kids screens: instrument tiles, drum steps, melody steps, arpeggiator settings](docs/images/screens.png)
 
-Use the workbench to update firmware, preview the instrument and manage projects, samples and DX7 voices. Select "Source + SDK" to download the development kit matching the online release. Back up projects, voices and samples before updating, and keep the device powered during writes.
+> Unofficial and not affiliated with M-VAVE. Version 0.1 passes every test in
+> an emulator of the FM-1 but has not yet been confirmed on a real FM-1. Back
+> up your FM-1 first; see the [flashing guide](docs/FLASHING.md).
 
-## V14 features
+## What it does
 
-- **DX7 library:** 128 voices in four groups of 32, with the M-VAVE FM1 original V15 factory voices and order. Saved user banks take priority. DX7 single-voice and 32-voice bank SysEx import/export is supported; extension parameters are not handled. Changing the library does not change patches already saved in projects.
-- **Track roles:** on SEQ **8/8 TRACK ROLE**, K1 selects NORMAL, PLAY or OFF; K2 selects input MIDI channel 1–16. PLAY retains the track's timbre and held notes across project changes. MUTE/SOLO use the existing controls, with independent NORMAL and PLAY solo groups. PLAY timbre edits are not saved with projects: export a timbre file, or save DX7 voices to the independent library.
-- **Step recording:** with the track set to NORMAL, press REC while stopped and play notes. Releasing all played keys advances to the next step, including DRUM 808 and SAMPLER. Overlapping notes share a step; during playback, REC records in time. PLAY tracks are for live performance and do not record notes.
-- **Tempo and delay:** internal tempo is 30–300 BPM. Tap Tempo is available on the workbench, with SEQ on the FX DELAY page, or with HOME held while tapping SEQ elsewhere. Delay supports tempo synchronization and fixed times of about 30–2040 ms.
+- **Eight instruments as picture tiles:** piano, bass, game (chiptune), guitar,
+  fun (samples) and drums. Turn SELECT to choose one and play the keys. On
+  melodic instruments every key fits (a C major pentatonic scale), so nothing
+  sounds wrong. Turn ALGORITHM to swap a tile's instrument.
+- **BEAT mode (SEQ):** the 16 white keys are 16 steps and the black keys pick
+  the drum or note. Key lights show the pattern and the playhead. Every drum
+  appears on the grid, and melody steps show their note by color and height.
+- **Arpeggiator (ARP):** tap for up, down, bounce or random; hold for "keep
+  going"; hold and turn the knobs for speed, octaves, note length and swing.
+- **Four knobs:** LOUD, BRIGHT, SOUND (with the sound's name) and SPEED.
+- **Hard to lose work:** songs save themselves once left alone while stopped,
+  EDIT is undo, and starting over asks first.
+- **Kind to small ears and parents:** a volume cap, a battery gauge with a
+  "charge me" warning, and a hidden parent panel (hold GLO) for Bluetooth MIDI
+  keyboards. A keyboard on MIDI channel 1 plays the chosen instrument.
+- **Never a dead end:** the firmware update path belongs to M-VAVE's SDK and
+  can't be blocked by this interface. Stock firmware or any other FM-1
+  firmware installs over it as usual.
 
-## MIDI
+## How it's made
 
-FM1 accepts DIN, USB and BLE MIDI input, with USB/BLE output. Default input channels 1–7 address tracks 1–7; channel 10 addresses track 8. Change each input channel on TRACK ROLE.
+M-VAVE's FM1 Open has two parts: an open-source app (GPL) and a closed binary
+SDK with the sound engines. FM1 Kids replaces only the app's screen code. The
+FM-1's flash is nearly full, so the kid interface replaces M-VAVE's menus
+instead of sitting beside them. Set `FM1_KID_UI` to 0 in
+[`app/kid/kid_config.h`](app/kid/kid_config.h) to build the original.
 
-- **5/8 SYNC / LOOP:** select internal or external clock, tempo, loop length and clock input.
-- **6/8 MIDI TRACK:** select SEQ/ARP LOCAL, BOTH or MIDI output, output channel, output ports and physical KEY OUT.
-- **7/8 MIDI ROUTING:** configure LOCAL, CLK OUT and MIDI Thru. For DAW monitoring with Local Off, enable KEY OUT and select the output ports.
+Every change is checked by GitHub Actions:
 
-MIDI preferences are saved independently of projects. The browser simulator previews these settings without sending performance MIDI to external ports; configure the instrument on its panel. MIDI Clock, Start, Continue, Stop and Song Position Pointer input are supported. Clock loss stops synchronized playback.
+- the firmware is built with JieLi's Linux toolchain, and M-VAVE's own checks
+  run on the finished image
+- the firmware is tested in [fm1-emu](https://github.com/joakimeriksson/fm1-emu),
+  an emulator of the FM-1, with scripted key presses that check the screen and
+  sound: notes, patterns, undo, the arpeggiator, autosave across a power cycle,
+  power cuts during saving, and more ([tests](tools/emu/README.md))
+- the original interface is built from the same source and compared with
+  M-VAVE's official release in the emulator, as a check on the toolchain
+- after the tests pass on `main`, the browser installer is published to GitHub
+  Pages
 
-## Updates and compatibility
+## Building
 
-V13 can update to V14. The workbench supports returning to original V15 and migrating from compatible third-party firmware. The standard FM1 update protocol remains available. Compatibility has been checked with selected firmware versions; it is not a guarantee for every third-party release.
+On a Mac or Linux, with [Docker](https://www.docker.com/products/docker-desktop/):
 
-Firmware switching does not make project and sample formats interchangeable. Keep exported backups for rollback. Older firmware may not support V14 track preferences, the independent voice library or synchronized/extended delay settings.
+```sh
+./build.sh preview            # browser preview: build/preview/index.html
+./build.sh firmware           # firmware: build/dx7/generated/FM1_OFFICIAL_OPEN.fwsc
+./build.sh preview --native   # preview without Docker (needs: brew install powershell)
+```
 
-To back up the independent voice library, read and export groups A–D separately. Project files do not contain sample audio. Restore custom samples from their sample bank backup; writing the built-in sample bank replaces the current samples.
+The browser preview runs the whole interface without an FM-1 and builds in
+seconds. Use it for most work. Details: [tools/unix/README.md](tools/unix/README.md).
 
-The eight sample slots share about 19.55 seconds of new sample storage. Existing larger banks remain readable; they may need to be backed up and reduced before writing the independent DX7 library.
+On Windows, M-VAVE's original scripts still work (`build.bat`). They need
+**JieLi Windows toolchain 2.5.3**
+([installer](https://jl-update.oss-cn-shenzhen.aliyuncs.com/2.5.3.exe),
+[installation guide](https://doc.zh-jieli.com/Tools/zh-cn/dev_tools/dev_env/jl_toolchain.html)),
+with `FM1_PI32_TOOLCHAIN` set to its `pi32` folder (usually `C:\JL\pi32`). The
+build checks the toolchain's files against `sdk/manifest.json`; for this SDK,
+`pi32/bin/clang.exe` has SHA-256
+`d4bc97cf421c1ccc373dd8924ce88720ff7457b3f1478d15df4aeda6ae923bce`. More in
+M-VAVE's [FM1 Open README](docs/FM1-OPEN.md).
 
-## Build
+## Repository layout
 
-Requires Windows x64, PowerShell, `curl.exe` and `tar.exe`. Firmware builds require **JieLi Windows toolchain 2.5.3**, which includes PI32v2 clang 4.0.1. [Download the 2.5.3 installer from JieLi](https://jl-update.oss-cn-shenzhen.aliyuncs.com/2.5.3.exe) and follow the [installation guide](https://doc.zh-jieli.com/Tools/zh-cn/dev_tools/dev_env/jl_toolchain.html). Set `FM1_PI32_TOOLCHAIN` to its `pi32` folder containing `bin/clang.exe` (normally `C:\JL\pi32`). FM1 continues to use the `r3` CPU target.
+| Path | What it is |
+|---|---|
+| `app/kid/` | The FM1 Kids interface, its settings and [controls](app/kid/README.md) |
+| `app/`, `sdk/`, `web/`, `third_party/` | M-VAVE's FM1 Open app, SDK and browser preview (small, marked FM1 Kids hooks in `screen.c` and `midi_router.c`) |
+| `tools/unix/`, `build.sh` | Builds on Mac, Linux and GitHub Actions |
+| `tools/emu/` | Emulator tests |
+| `tools/pages/` | The installer landing page |
+| `docs/` | [Flashing guide](docs/FLASHING.md) and M-VAVE's [FM1 Open README](docs/FM1-OPEN.md) |
 
-The build checks all 22 toolchain files against `sdk/manifest.json`. Older V14 kits were pinned to 2.5.2 and reject 2.5.3; update the complete source + SDK kit together, keeping the manifest checks enabled. For this revision, the expected SHA-256 of `pi32/bin/clang.exe` is `d4bc97cf421c1ccc373dd8924ce88720ff7457b3f1478d15df4aeda6ae923bce`.
+## Credits
 
-For a local web preview:
-
-~~~powershell
-.\tools\Build-Web.ps1 -LocalPreview
-~~~
-
-For distribution builds, first set `FM1_SOURCE_URL` to the HTTPS URL of the matching source archive, including your changes, licenses and build/install scripts. Then run:
-
-~~~powershell
-.\build.bat --web
-$env:FM1_PI32_TOOLCHAIN = 'C:\JL\pi32'
-.\build.bat --package
-~~~
-
-For a local firmware build without a distribution source URL, run `./sdk/Build.ps1 -FirmwareOnly -Toolchain 'C:\JL\pi32'`. A moving GitHub `tree/main` page is not a matching source archive for distribution.
-
-The web version builds from the included C sources. Its first build downloads WASI SDK 27; set `FM1_WASI_SDK` to reuse an installation. Outputs are `build/preview/index.html`, `build/dx7/generated/FM1_OFFICIAL_OPEN.fwsc` and `build/official-web/FM1-Official-Open-Source.html`.
-
-The [per-track tuning API](app/instrument.h) supports custom tuning; a dedicated tuning editor is not included.
+- [M-VAVE](https://www.m-vave.com/): the FM-1 and FM1 Open (app source, SDK,
+  sound engines and browser workbench)
+- [Dexed / msfa](https://github.com/asb2m10/dexed): the FM engine inside FM1 Open
+- [fm1-emu](https://github.com/joakimeriksson/fm1-emu) by Joakim Eriksson: the
+  emulator used for testing
+- [FM-1 Transporter](https://github.com/kurogedelic/FM-1-transporter) and
+  [Felucca](https://github.com/hugelton/Felucca) by Leo Kuroshita: the recovery
+  tool, and the reference for building on Linux and for the battery levels
+- [FM-1-RE](https://github.com/AL-255/FM-1-RE) and the FM-1 community's
+  reverse-engineering work
 
 ## License
 
-APP: [GPLv3 with the FM1 SDK linking exception](LICENSE.md). The device engine is supplied as a binary SDK with separate terms. Retain the applicable [SDK terms, third-party licenses and contributor notices](THIRD_PARTY.md) when distributing builds.
+The app is [GPLv3 with the FM1 SDK linking exception](LICENSE.md), as in FM1
+Open. The sound engines come as M-VAVE's binary SDK under separate terms. Keep
+[LICENSE.md](LICENSE.md) and the [SDK terms and third-party
+notices](THIRD_PARTY.md) with any build you share.
