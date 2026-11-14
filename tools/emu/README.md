@@ -12,7 +12,7 @@ FM-1, and checks that:
   pattern plays with no key held (FM1 Open-based firmware; stock V15 differs)
 The kid build also runs `--suite kids`:
 
-- **startover:** FX, then FX again, silences the loop; EDIT (undo) brings it back
+- **startover:** FX, then FX again, silences the loop; LFO (undo) brings it back
 - **quiet:** SEL quiets the chosen instrument and brings it back
 - **arp:** with the arpeggiator on, one held key plays several notes
 - **arp-timing:** FAST at 1/16 plays clearly more notes than at 1/4
@@ -20,6 +20,9 @@ The kid build also runs `--suite kids`:
 - **picker:** turning ALGORITHM changes the tile, and the new instrument plays
 - **autosave:** a pattern left alone for a few seconds is still there after a
   power cycle, without pressing SAVE
+- **learn:** guided notes advance only on the correct key
+- **help, songs, keys, silly, parts, sparks, instruments, sound edit:** exercise the additional controls and visuals
+- **parent-release:** opening the parent panel releases a held note
 - **battery:** a low battery reading turns the battery icon red
 
 Every build is also checked for:
@@ -44,7 +47,7 @@ Run it locally (build `fm1-live` from the emulator repo with
 
 ```sh
 python3 tools/emu/fm1_emu_test.py --emu PATH/fm1-live \
-    --fwsc build/dx7/generated/FM1_OFFICIAL_OPEN.fwsc --out build/emu
+    --fwsc build/dx7/generated/FM1_OFFICIAL_OPEN.fwsc --out build/emu --suite kids
 ```
 
 Key names for new scenarios (in `SCENARIOS`): the printed button names

@@ -31,7 +31,7 @@ The battery icon shows the stock firmware's three levels, a + while on USB
 power, and flashes red with CHARGE ME! when nearly empty (the song saves
 itself then too). A keyboard on MIDI channel 1 (USB, Bluetooth or the DIN
 jack) plays the chosen instrument; channels 2–16 keep their usual tracks.
-The firmware identifies itself as `FM-1_8100001` (FM1 Kids 0.9), still in
+The firmware identifies itself as `FM-1_8100001` (FM1 Kids 1.0), still in
 M-VAVE's open range, so the workbench can install other firmware over it.
 
 **For parents, hold GLO** to open the Bluetooth MIDI panel. By default a
@@ -39,8 +39,7 @@ phone, tablet or computer connects to the FM-1. To use a Bluetooth MIDI
 keyboard, hold GLO and press PLAY to search, turn SELECT to choose, and press
 SAVE to connect. REC disconnects; HOME switches back to the default.
 
-The MASTER knob is capped at about three-quarters volume to protect young
-ears (`KID_MASTER_LIMIT` in `kid_config.h`; 1023 removes the cap). Every
+The MASTER knob is capped at about three-quarters volume to reduce the maximum output (`KID_MASTER_LIMIT` in `kid_config.h`; 1023 removes the cap). Every
 track loops 16 steps, one row of white keys.
 
 ## How it is built
@@ -114,8 +113,8 @@ ACID ALLEY, CHIP PARADE, ...). PLAY loads the chosen one and starts it.
 - A loaded demo is kept in the last project slot (16), so changes to it are
   saved too. Loading another demo replaces it. If slot 16 holds a project
   made with another firmware, the kid UI says SLOT 16 BUSY and leaves it alone.
-- Demo patterns are four bars long and keep their length; BEAT mode shows and
-  edits the first bar. Tracks the kid fills in loop one row of keys as before.
+- BEAT mode shows the selected part A–D; ALGORITHM chooses which part to edit.
+  Playback loops through to the last part containing notes. Tracks the kid fills in loop one row of keys as before.
 
 ## Versions
 
@@ -131,5 +130,4 @@ tunes, melody only). PLAY starts one: the key to press next lights up, the
 screen shows the next note in its colour and a bar shows how far along it is.
 Only the right key moves on; any key still plays. At the end it says YAY! and
 goes back to normal. HOME stops early. While playing along the keys use DO RE
-MI (every white key as printed) and chords are off; the earlier scale and
-chords come back afterwards.
+MI (every white key as printed) and chords are off; the earlier scale, chords and octave come back afterwards.

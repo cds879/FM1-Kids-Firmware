@@ -87,9 +87,9 @@ steps, PLAY plays them, and SAVE then a power cycle keeps the project.
 
 The same steps with **Install FM1 Kids**.
 
-**Check:** FM1 KIDS 0.1 at startup, then picture tiles; keys play; SEQ makes a
-beat that PLAY plays; the battery icon is green (with **+** on USB); a pattern
-left alone for ten seconds is still there after a power cycle; holding GLO
+**Check:** FM1 KIDS 1.0 at startup, then picture tiles; keys play; SEQ makes a
+beat that PLAY plays; the battery icon reflects its charge (with **+** on USB); a pattern
+left alone while stopped for at least eight seconds is still there after a power cycle; holding GLO
 shows the Bluetooth panel.
 
 **If it won't connect:** switch the FM-1 off and on, unplug and replug the
