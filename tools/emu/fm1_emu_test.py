@@ -273,6 +273,12 @@ def heard(work, start, end, loud=True):
 
 def kid_checks(emu, fwsc, out):
     results = {}
+    name = "parent-release"
+    r, c = kid_run(emu, fwsc, out, name, 7000,
+                   "2000:e1:1,3000:C4@100,3500:GLO,3700:C4^,6500:GLO^")
+    c += [("held organ sounds", *heard(out / name, 3100, 3400)),
+          ("parent panel releases it", *heard(out / name, 5500, 6200, loud=False))]
+    results[name] = c
     # Start over: FX asks, FX again clears; LFO (undo) brings the loop back.
     name = "startover"
     r, c = kid_run(emu, fwsc, out, name, 7000, PATTERN + ",2200:PLAY,2300:PLAY^,3000:FX,3100:FX^,3300:FX,3400:FX^,5000:LFO,5100:LFO^")

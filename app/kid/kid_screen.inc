@@ -240,6 +240,7 @@ static const struct { const char *name; uint8_t notes[56]; } tunes[TUNES] = {
 enum { DEMO_SLOT = GROOVE_PROJECT_SLOTS - 1, SONGS = 1 + GROOVE_FACTORY_PROJECTS + TUNES };
 static unsigned learn, learn_pos, learn_key = 0xff, learn_scale, learn_chords;   /* learn: tune + 1 */
 static uint32_t learn_done_at;
+static int learn_octave;
 static unsigned sound_panel;
 static unsigned help, home_page;      /* hold HOME: the help page shown, the page HOME was pressed on */
 static uint32_t home_down_at;          /* EDIT: REVERB, ECHO, LONG and ROOM on K1..K4 */
@@ -639,8 +640,9 @@ static void autosave(uint32_t now)
  * ends on the track it started on, even if the choice changes meanwhile. */
 int groove_kid_route(const uint8_t *m, size_t n, uint8_t out[3])
 {
+    if (n < 2) return 0;
     unsigned status = m[0] & 0xf0U;
-    if (n < 2 || m[0] < 0x80U || status == 0xf0U || (m[0] & 15U)) return 0;
+    if (m[0] < 0x80U || status == 0xf0U || (m[0] & 15U)) return 0;
     unsigned ch = keyboard_channel & 15U, note = m[1] & 127U;
     if (status == 0x80U || status == 0x90U || status == 0xa0U) {
         if (status == 0x90U && n > 2 && m[2]) keyboard_held[note] = (uint8_t)(ch + 1U);
@@ -1206,20 +1208,21 @@ static unsigned learn_note(void) { return tunes[learn - 1U].notes[learn_pos]; }
 static void learn_find_key(void)
 {
     learn_key = 0xff;
-    if (!learn || !learn_note()) return;
+    if (!learn || learn_done_at || !learn_note()) return;
     for (unsigned k = 0; k < 27; ++k)
         if (groove_key_note(track, k, octave) == learn_note()) { learn_key = k; return; }
 }
 static void learn_stop(void)
 {
     if (!learn) return;
+    release_keys();
     learn = 0; learn_key = 0xff;
-    scale = learn_scale; chords = learn_chords;
+    scale = learn_scale; chords = learn_chords; octave = learn_octave;
 }
 static void learn_start(unsigned tune)
 {
     release_keys();
-    if (!learn) { learn_scale = scale; learn_chords = chords; }
+    if (!learn) { learn_scale = scale; learn_chords = chords; learn_octave = octave; }
     learn = tune + 1U; learn_pos = 0; learn_done_at = 0;
     scale = 2; chords = 0;                              /* DO RE MI: every white key as it is */
     if (drum_track(track))                             /* tunes need a melody instrument */
@@ -1362,6 +1365,7 @@ void groove_screen_control(void)
     fm1_ble_get_status(&ble);
     parent = (c.buttons & BUTTON(GLO)) != 0;
     if (parent) {
+        release_keys();
         unsigned count = ble.count < FM1_BLE_MAX_DEVICES ? ble.count : FM1_BLE_MAX_DEVICES;
         ble_pick = (unsigned)clampi((int)ble_pick + c.encoders[0], 0, count ? (int)count - 1 : 0);
         if (pressed & BUTTON(PLAY)) {
@@ -1481,7 +1485,7 @@ void groove_screen_control(void)
     }
     if (pressed & BUTTON(ENV)) {
         songs_panel = !songs_panel;
-        if (songs_panel) { song_pick = current_song(); sound_panel = 0; }
+        if (songs_panel) { learn_stop(); song_pick = current_song(); sound_panel = 0; }
     }
     if ((pressed & BUTTON(PLAY)) && songs_panel && song_pick > GROOVE_FACTORY_PROJECTS) {
         pressed &= ~BUTTON(PLAY);
