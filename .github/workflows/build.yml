@@ -177,11 +177,10 @@ jobs:
   pages:
     # The browser installer on GitHub Pages: only from main, only after the
     # emulator tests pass. Needs Settings > Pages > Source: GitHub Actions once;
-    # until then this job reports what to do and the workflow stays green.
+    # publishing failures must fail the release workflow.
     name: Publish installer (GitHub Pages)
-    needs: [firmware, emulator]
+    needs: [firmware, emulator, docker]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    continue-on-error: true
     runs-on: ubuntu-latest
     permissions:
       contents: read

@@ -23,4 +23,4 @@ No physical-device test of this candidate has been performed in this review.
 
 After checks pass, merge to main to publish the installer through GitHub Pages.
 Verify the Pages deployment itself succeeded and the installer displays 1.0;
-a green build alone is insufficient because the Pages job currently allows failure.
+publishing failures fail the workflow, and publication also waits for the Docker check.

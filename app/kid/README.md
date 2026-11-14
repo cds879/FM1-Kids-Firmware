@@ -39,8 +39,9 @@ phone, tablet or computer connects to the FM-1. To use a Bluetooth MIDI
 keyboard, hold GLO and press PLAY to search, turn SELECT to choose, and press
 SAVE to connect. REC disconnects; HOME switches back to the default.
 
-The MASTER knob is capped at about three-quarters volume to reduce the maximum output (`KID_MASTER_LIMIT` in `kid_config.h`; 1023 removes the cap). Every
-track loops 16 steps, one row of white keys.
+The MASTER knob is capped at about three-quarters volume to reduce the maximum
+output (`KID_MASTER_LIMIT` in `kid_config.h`; 1023 removes the cap). Each song
+part has 16 steps, one row of white keys.
 
 ## How it is built
 
@@ -114,7 +115,7 @@ ACID ALLEY, CHIP PARADE, ...). PLAY loads the chosen one and starts it.
   saved too. Loading another demo replaces it. If slot 16 holds a project
   made with another firmware, the kid UI says SLOT 16 BUSY and leaves it alone.
 - BEAT mode shows the selected part A–D; ALGORITHM chooses which part to edit.
-  Playback loops through to the last part containing notes. Tracks the kid fills in loop one row of keys as before.
+  Playback loops through to the last part containing notes.
 
 ## Versions
 
@@ -130,4 +131,5 @@ tunes, melody only). PLAY starts one: the key to press next lights up, the
 screen shows the next note in its colour and a bar shows how far along it is.
 Only the right key moves on; any key still plays. At the end it says YAY! and
 goes back to normal. HOME stops early. While playing along the keys use DO RE
-MI (every white key as printed) and chords are off; the earlier scale, chords and octave come back afterwards.
+MI (every white key as printed) and chords are off; the earlier scale, chords
+and octave come back afterwards. Opening ENV also leaves Play Along.
