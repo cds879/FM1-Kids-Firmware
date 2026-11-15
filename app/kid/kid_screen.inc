@@ -83,19 +83,22 @@ static uint32_t bend_at;
 /* Kid instruments: what the picker offers and the tiles show. Several use the
  * DX7 engine with a chosen factory voice; the others are whole engines. */
 enum { I_PIANO, I_ORGAN, I_TRUMPET, I_FLUTE, I_VIOLIN, I_CHOIR, I_BELLS, I_XYLO,
-       I_GUITAR, I_BASS, I_ROBOT, I_DREAM, I_GAME, I_FUN, I_DRUMS, I_COUNT };
+       I_GUITAR, I_BASS, I_ROBOT, I_DREAM, I_GAME, I_FUN, I_DRUMS,
+       I_MAGIC, I_SPACE, I_SFX, I_COUNT };
 static const char *const kind_name[I_COUNT] = {"PIANO", "ORGAN", "TRUMPET", "FLUTE", "VIOLIN", "CHOIR",
                                                "BELLS", "XYLOPHONE", "GUITAR", "BASS", "ROBOT", "DREAM",
-                                               "GAME", "FUN", "DRUMS"};
+                                               "GAME", "FUN", "DRUMS", "MAGIC", "SPACE", "SFX"};
 /* Engine and starting DX7 voice for each (0xff: not DX7). Swap voices freely. */
 static const struct { uint8_t engine, program; } kind_sound[I_COUNT] = {
     {GROOVE_DX7, 0},   {GROOVE_DX7, 1},    {GROOVE_DX7, 64},  {GROOVE_DX7, 65},   {GROOVE_DX7, 66},
     {GROOVE_DX7, 67},  {GROOVE_DX7, 120},  {GROOVE_DX7, 117}, {GROOVE_PLUCK, 0xff}, {GROOVE_DX7, 34},
-    {GROOVE_DX7, 2},   {GROOVE_DX7, 3},    {GROOVE_PSG, 0xff}, {GROOVE_SAMPLE, 0xff}, {GROOVE_808, 0xff}};
+    {GROOVE_DX7, 2},   {GROOVE_DX7, 3},    {GROOVE_PSG, 0xff}, {GROOVE_SAMPLE, 0xff}, {GROOVE_808, 0xff},
+    {GROOVE_DX7, 100}, {GROOVE_DX7, 99}, {GROOVE_DX7, 96}};
 /* A second engine SOUND moves on to: guitar goes pluck -> DX7 guitars,
  * bass goes DX7 basses -> the 303 bass line. */
 static const uint8_t kind_other[I_COUNT] = {
-    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, GROOVE_DX7, GROOVE_303, 0xff, 0xff, 0xff, 0xff, 0xff};
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, GROOVE_DX7, GROOVE_303, 0xff, 0xff, 0xff, 0xff, 0xff,
+    0xff, 0xff, 0xff};
 /* Pictures: 16x12 drawn 3x, or 24x18 drawn 2x (same size on screen); the
  * leftmost pixel is the highest used bit. Order follows the kid instruments. */
 static const struct { uint8_t w, h; uint32_t rows[18]; } kind_icon[I_COUNT] = {
@@ -123,7 +126,10 @@ static const struct { uint8_t w, h; uint32_t rows[18]; } kind_icon[I_COUNT] = {
                          0xf80000, 0x7c0004, 0x7e000e, 0x7f0004, 0x3fc000, 0x3ff820, 0x1ff870, 0x07e020, 0x000000}},
     /* GAME */ {16, 12, {0x1010, 0x0820, 0x1ff0, 0x37d8, 0x7ffc, 0x5ff4, 0x5014, 0x0c60, 0x0000, 0x0000, 0x0000, 0x0000}},
     /* FUN */ {16, 12, {0x0100, 0x0100, 0x0380, 0xfff8, 0x7ff0, 0x3fe0, 0x1fc0, 0x3de0, 0x38e0, 0x6030, 0x0000, 0x0000}},
-    /* DRUMS */ {16, 12, {0x8001, 0x4002, 0x2004, 0x1008, 0x3ffc, 0x4002, 0x7ffe, 0x5555, 0x5555, 0x5555, 0x7ffe, 0x0000}}};
+    /* DRUMS */ {16, 12, {0x8001, 0x4002, 0x2004, 0x1008, 0x3ffc, 0x4002, 0x7ffe, 0x5555, 0x5555, 0x5555, 0x7ffe, 0x0000}},
+    /* MAGIC: star wand */ {16, 12, {0x0010, 0x0054, 0x0038, 0x01b8, 0x00f8, 0x0050, 0x0090, 0x0100, 0x0200, 0x0400, 0x0800, 0x1000}},
+    /* SPACE: flying saucer */ {16, 12, {0x0000, 0x03c0, 0x07e0, 0x0ff0, 0x0ff0, 0x3ffc, 0x7ffe, 0x3ffc, 0x0ff0, 0x1248, 0x0420, 0x0000}},
+    /* SFX: comic impact burst */ {16, 12, {0x0100, 0x1108, 0x0910, 0x07c0, 0x7ffe, 0x1ff8, 0xffff, 0x1ff8, 0x7ffe, 0x07c0, 0x0910, 0x1108}}};
 /* Five columns per glyph, bit 0 at the top: digits, then A..Z (M-VAVE's font). */
 static const uint8_t font[36][5] = {
     {0x3e, 0x51, 0x49, 0x45, 0x3e}, {0, 0x42, 0x7f, 0x40, 0},       {0x42, 0x61, 0x51, 0x49, 0x46},
@@ -184,8 +190,10 @@ static unsigned part, song_parts = 1;
  * (a drum jumps, a bass rumbles, a bell swings, ...) and sends its own kind
  * of sparks out of it (notes, stars, puffs of air, rings, pixels, bangs). */
 enum { SPARKS = 10, SPARK_MS = 700, MOVE_MS = 360 };
-enum { M_HOP, M_RUMBLE, M_SWING, M_STRUM, M_PUFF, M_STEP, M_BLINK };
-enum { P_NOTE, P_STAR, P_PIXEL, P_PUFF, P_RING, P_BANG };
+enum { M_HOP, M_RUMBLE, M_SWING, M_STRUM, M_PUFF, M_STEP, M_BLINK,
+       M_WAND, M_UFO, M_IMPACT };
+enum { P_NOTE, P_STAR, P_PIXEL, P_PUFF, P_RING, P_BANG,
+       P_GLITTER, P_BEAM, P_ZAP };
 static const struct { uint8_t move, spark; } kind_anim[I_COUNT] = {
     {M_HOP, P_NOTE},   /* PIANO: hops, notes */           {M_PUFF, P_NOTE},    /* ORGAN: breathes, notes */
     {M_PUFF, P_PUFF},  /* TRUMPET: blows, puffs */        {M_PUFF, P_PUFF},    /* FLUTE */
@@ -194,7 +202,10 @@ static const struct { uint8_t move, spark; } kind_anim[I_COUNT] = {
     {M_STRUM, P_NOTE}, /* GUITAR: strums */               {M_RUMBLE, P_RING},  /* BASS: rumbles, waves */
     {M_BLINK, P_PIXEL},/* ROBOT: blinks, bits */          {M_SWING, P_STAR},   /* DREAM: floats, twinkles */
     {M_STEP, P_PIXEL}, /* GAME: jumps in steps, pixels */ {M_HOP, P_STAR},     /* FUN */
-    {M_HOP, P_BANG}};  /* DRUMS: jump, bang! */
+    {M_HOP, P_BANG},   /* DRUMS: jump, bang! */
+    {M_WAND, P_GLITTER}, /* MAGIC: wand flick and drifting sparkles */
+    {M_UFO, P_BEAM},    /* SPACE: hovering saucer and sweeping light */
+    {M_IMPACT, P_ZAP}}; /* SFX: jolting burst and electric sparks */
 static struct { uint8_t note, track, kind; uint32_t at; } sparks[SPARKS];
 static unsigned spark_next;
 static uint32_t hit_at[GROOVE_TRACKS];  /* when each instrument last started a note */
@@ -346,16 +357,20 @@ static void say(const char *s, uint16_t color, uint32_t now)
 }
 static unsigned drum_track(unsigned t) { return groove_pad_count(t) != 0; }
 static unsigned kind(unsigned t) { unsigned k = groove_source_type(t); return k < GROOVE_SOURCES ? k : 0; }
+/* MAGIC (100,101,104,106,108,112,116,118), SPACE (99,111,124),
+ * and SFX (96,97,102,103,107,110,115,119,121,123,126,127) reuse
+ * embedded factory DX7 patches: no downloads, PCM samples or extra engines. */
 /* Which kid instrument a DX7 voice sounds like (the factory bank repeats in fours). */
 static unsigned voice_look(unsigned p)
 {
     static const uint8_t low[4] = {I_PIANO, I_ORGAN, I_ROBOT, I_DREAM}, high[4] = {I_TRUMPET, I_FLUTE, I_VIOLIN, I_CHOIR};
     /* 96..127, the odd ones: bells and metal, tuned wood and drums, dreamy, the rest robots. */
+    /* Factory oddball patches, now browsable directly. TUB BELLS stays BELLS. */
     static const uint8_t odd[32] = {
-        I_ROBOT, I_ROBOT, I_XYLO,  I_DREAM, I_BELLS, I_BELLS, I_ROBOT, I_ROBOT,   /*  96 BOWOAN .. 103 MONO M */
-        I_BELLS, I_XYLO,  I_BELLS, I_ROBOT, I_BELLS, I_XYLO,  I_ROBOT, I_DREAM,   /* 104 TIBET .. 111 DESCENT */
-        I_BELLS, I_XYLO,  I_XYLO,  I_ROBOT, I_BELLS, I_XYLO,  I_BELLS, I_ROBOT,   /* 112 CLANG BELL .. 119 */
-        I_BELLS, I_ROBOT, I_XYLO,  I_ROBOT, I_DREAM, I_XYLO,  I_ROBOT, I_ROBOT};  /* 120 TUB BELLS .. 127 */
+        I_SFX, I_SFX, I_XYLO, I_SPACE, I_MAGIC, I_MAGIC, I_SFX, I_SFX,
+        I_MAGIC, I_XYLO, I_MAGIC, I_SFX, I_MAGIC, I_XYLO, I_SFX, I_SPACE,
+        I_MAGIC, I_XYLO, I_XYLO, I_SFX, I_MAGIC, I_XYLO, I_MAGIC, I_SFX,
+        I_BELLS, I_SFX, I_XYLO, I_SFX, I_SPACE, I_XYLO, I_SFX, I_SFX};
     if (p < 32) return low[p % 4U];
     if (p < 64) return p % 4U < 2 ? I_GUITAR : I_BASS;
     if (p < 96) return high[p % 4U];
@@ -457,7 +472,14 @@ static void toggle_step(unsigned step)
     unsigned note = drum_track(track) ? groove_pad_note(track, drum) : beat_note;
     uint8_t notes[3];
     if (!on && chords && !drum_track(track)) groove_sequence_chord(track, step, notes, chord_notes(note, notes), 100);
-    else groove_sequence_edit(track, step, note, on ? 0 : 100);
+    else {
+        /* The 808 uses one velocity per step, shared by all active drums.
+         * Give the downbeats a strong pulse and offbeats a gentler touch.
+         * No new samples or DSP code, and existing patterns stay untouched. */
+        unsigned beat = step % KID_STEPS;
+        unsigned velocity = drum_track(track) ? (beat % 4U == 0 ? 115U : beat % 2U == 0 ? 94U : 76U) : 100U;
+        groove_sequence_edit(track, step, note, on ? 0 : velocity);
+    }
 }
 /* The scale note at or below a pitch. */
 static unsigned snap(unsigned note, uint16_t set)
@@ -901,7 +923,10 @@ static void tile_move(unsigned t, unsigned look_i, int *dx, int *dy, unsigned *l
     case M_STRUM:  *dy = phase & 1U ? 2 : -1; break;                          /* strings wobble */
     case M_PUFF:   *dx = age < 120U ? -3 : 0; break;                          /* breathe in, blow */
     case M_STEP:   *dy = age < 120U ? -6 : age < 240U ? -3 : 0; break;        /* 8-bit jump */
-    case M_BLINK:  *lit = (phase & 1U) == 0; break;                           /* lights flash */
+    case M_BLINK:  *lit = (phase & 1U) == 0; break;
+    case M_WAND:   *dx = phase & 1U ? 2 : -2; *dy = -left * 3 / MOVE_MS; break;
+    case M_UFO:    *dy = (phase / 2U) & 1U ? -3 : 1; *lit = (phase & 3U) < 2U; break;
+    case M_IMPACT: *dx = phase & 1U ? -3 : 3; *dy = left * 2 / MOVE_MS; *lit = (phase & 1U) == 0; break;                           /* lights flash */
     }
 }
 /* One spark, by kind; age runs 0..SPARK_MS. ink stands out on the tile; tint
@@ -951,6 +976,37 @@ static void draw_spark(unsigned kind_s, unsigned note, uint32_t age, int x, int 
             if (a < k * 200) continue;
             cfill(cx - r, cy - r, 2 * r + 2, 2, ink); cfill(cx - r, cy + r, 2 * r + 2, 2, ink);
             cfill(cx - r, cy - r, 2, 2 * r + 2, ink); cfill(cx + r, cy - r, 2, 2 * r + 2, ink);
+        }
+        break;
+    }
+    case P_GLITTER: { /* wand: three tiny stars scatter upward */
+        for (int k = 0; k < 3; ++k) {
+            int sx = x + 12 + ((n + k * 7) % 14) * 2 + a * (k - 1) / 90;
+            int sy = y + 35 - a * (k + 2) / 65;
+            cfill(sx - 3, sy, 7, 2, ink);
+            cfill(sx, sy - 3, 2, 7, ink);
+            cfill(sx, sy, 2, 2, tint);
+        }
+        break;
+    }
+    case P_BEAM: { /* UFO: shifting light beam and orbiting dots */
+        int sweep = (a / 90 + n) % 9 - 4;
+        for (int k = 0; k < 3; ++k) {
+            int bx = cx + sweep * (k + 1) / 2;
+            int by = y + 28 + k * 6;
+            cfill(bx - (k + 1) * 3, by, (k + 1) * 6 + 1, 2, ink);
+        }
+        cfill(cx - 14 + a * 22 / SPARK_MS, cy - 18, 4, 4, tint);
+        cfill(cx + 12 - a * 20 / SPARK_MS, cy - 12, 3, 3, ink);
+        break;
+    }
+    case P_ZAP: { /* impact: jagged bolts spread from the center */
+        int d = 5 + a * 16 / SPARK_MS;
+        for (int k = -1; k <= 1; ++k) {
+            int zx = cx + k * d, zy = cy - d + (k ? 4 : 0);
+            cfill(zx, zy, 4, 3, ink);
+            cfill(zx + (k ? 3 : -3), zy + 5, 3, 6, tint);
+            cfill(zx + (k ? 6 : -6), zy + 12, 5, 3, ink);
         }
         break;
     }

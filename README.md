@@ -20,11 +20,12 @@ sound engines.
 
 ## What it does
 
-- **Eight tiles, 15 instruments with pictures:** piano, organ, trumpet, flute,
+- **Eight tiles, 18 instrument choices with pictures:** piano, organ, trumpet, flute,
   violin, choir, bells, xylophone, guitar, bass, robot, dream, game (chiptune),
-  fun (samples) and drums. Turn SELECT to choose one and play the keys. On
+  fun (samples), drums, magic, space, and SFX. Turn SELECT to choose one and play the keys. On
   melodic instruments every key fits (HAPPY, a C major pentatonic scale, to start), so nothing
   sounds wrong. Turn ALGORITHM to swap a tile's instrument.
+- **Additional ready-to-play sounds:** MAGIC, SPACE and SFX expose 23 of the already embedded unusual DX7 factory voices through the kid interface; no post-install imports. Existing drums get stronger downbeats and gentler offbeats on newly programmed steps.
 - **BEAT mode (SEQ):** the 16 white keys are 16 steps and the black keys pick
   the drum or note. Key lights show the pattern and the playhead. Every drum
   appears on the grid, and melody steps show their note by color and height.

@@ -465,6 +465,23 @@ def kid_checks(emu, fwsc, out):
           differ("BELLS has its own picture and voice", "trumpet", "bells"),
           differ("SOUND moves to another trumpet voice", "trumpet", "trumpet-2")]
     results[name] = c
+    # The additional kid-friendly choices expose embedded DX7 voices; they
+    # must each play, have different voices, and move through their own group.
+    name = "playful-sounds"
+    playful = {}
+    for label, turns in (("magic", "2000:e1:15,"), ("space", "2000:e1:16,"),
+                         ("sfx", "2000:e1:17,"), ("magic-next", "2000:e1:15,2900:e4:1,")):
+        r, checks = kid_run(emu, fwsc, out, f"{name}-{label}", 5000, turns + tune)
+        audio = out / f"{name}-{label}" / "frames" / "audio.raw"
+        segment = audio.read_bytes()[3500 * RATE // 1000 * 4:4500 * RATE // 1000 * 4] if audio.exists() else b""
+        playful[label] = (checks[0][1], segment)
+    c = [("emulator ran cleanly", all(v[0] for v in playful.values()), "4 runs")]
+    for label in ("magic", "space", "sfx"):
+        c.append((f"{label} plays", *heard(out / f"{name}-{label}", 3600, 4500)))
+    for a, b in (("magic", "space"), ("space", "sfx"), ("magic", "magic-next")):
+        c.append((f"{a} differs from {b}", bool(playful[a][1]) and playful[a][1] != playful[b][1],
+                  "audio differs" if playful[a][1] != playful[b][1] else "audio identical"))
+    results[name] = c
     # BASS uses the DX7 bass voices; SOUND runs on through them to the 303.
     name = "bass"
     for label, turns in (("bass", "2000:e1:9,"), ("bass-303", "2000:e1:9,2900:e4:16,")):
@@ -482,8 +499,9 @@ def kid_checks(emu, fwsc, out):
          differ("BASS has its own picture and voice", "piano", "bass"),
          differ("SOUND moves on to the 303 bass line", "bass", "bass-303")]
     # The new project's own bass tile (track 2) must already be the kid BASS:
+    # 18 picker choices: a full turn through all of them must select BASS again.
     # choosing BASS for it again must not change its sound.
-    for label, turns in (("tile", "1500:e0:1,"), ("tile-picked", "1500:e0:1,2000:e1:15,")):
+    for label, turns in (("tile", "1500:e0:1,"), ("tile-picked", "1500:e0:1,2000:e1:18,")):
         r, c1 = kid_run(emu, fwsc, out, f"{name}-{label}", 5000, turns + tune)
         audio = out / f"{name}-{label}" / "frames" / "audio.raw"
         runs[label] = (c1[0][1], audio.read_bytes()[3500 * RATE // 1000 * 4:4500 * RATE // 1000 * 4]
