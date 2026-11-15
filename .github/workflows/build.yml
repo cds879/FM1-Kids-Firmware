@@ -143,7 +143,8 @@ jobs:
       - name: Emulator test (kid UI)
         run: |
           python3 tools/emu/fm1_emu_test.py --emu ~/fm1-emu-bin/fm1-live \
-            --fwsc artifact/out/FM1-Kids.fwsc --out emu-results/kids --suite kids
+            --fwsc artifact/out/FM1-Kids.fwsc --out emu-results/kids --suite kids \
+            --profile "${{ github.ref == 'refs/heads/main' && 'full' || 'pr' }}"
 
       - name: Emulator test (original UI, compared with M-VAVE's build)
         if: always()
@@ -152,7 +153,8 @@ jobs:
           [ -f official.fwsc ] && ref="--reference official.fwsc"
           python3 tools/emu/fm1_emu_test.py --emu ~/fm1-emu-bin/fm1-live \
             --fwsc artifact/out/FM1-Open-original.fwsc --out emu-results/original \
-            $ref --reference-label "${{ steps.official.outputs.label }}"
+            $ref --reference-label "${{ steps.official.outputs.label }}" \
+            --profile "${{ github.ref == 'refs/heads/main' && 'full' || 'pr' }}"
 
       - name: Summary
         if: always()
@@ -171,6 +173,7 @@ jobs:
           path: |
             emu-results/*/summary.md
             emu-results/*/results.json
+            emu-results/*/timings.json
             emu-results/*/*/*.png
             emu-results/*/*/*.wav
 
