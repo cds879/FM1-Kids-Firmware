@@ -253,6 +253,11 @@ static unsigned learn, learn_pos, learn_key = 0xff, learn_scale, learn_chords;  
 static uint32_t learn_done_at;
 static int learn_octave;
 static unsigned sound_panel;
+/* Drum Fun and momentary live FX use existing 808/synth parameters, not samples. */
+static unsigned drum_style, fx_key = 255, fx_touched;
+static uint32_t fx_started, fx_pulse_at;
+static int fx_volume_before, fx_bright_before, fx_tempo_before, fx_silly_before;
+static uint8_t fx_sends_before[2];
 static unsigned help, home_page;      /* hold HOME: the help page shown, the page HOME was pressed on */
 static uint32_t home_down_at;          /* EDIT: REVERB, ECHO, LONG and ROOM on K1..K4 */
 static int8_t knob_dir[7];            /* knob acceleration: turning fast takes bigger steps */
@@ -547,6 +552,113 @@ static void bright_edit(int delta)
     if (!bright_target(track, &b)) return;
     if (b.fm) groove_fm_edit(track, b.param, delta);
     else groove_tone_edit(track, b.part, b.param, delta);
+}
+/* 808 factory synthesis controls, addressed by descriptor name so each
+ * pad's different parameter layout is respected. */
+static int drum_param(unsigned pad, const char *name)
+{
+    unsigned n = groove_tone_count(track, pad);
+    for (unsigned i = 0; i < n; ++i) {
+        const fm1_param_t *p = groove_tone_parameter(track, pad, i);
+        if (p && !strcmp(p->name, name)) return (int)i;
+    }
+    return -1;
+}
+static int drum_value(unsigned pad, const char *name)
+{
+    int p = drum_param(pad, name);
+    uint8_t values[GROOVE_TONE_PARAMS];
+    if (p < 0 || groove_tone_copy(track, pad, values) <= p) return -1;
+    return values[p];
+}
+static void drum_set(unsigned pad, const char *name, int value)
+{
+    int p = drum_param(pad, name);
+    if (p < 0) return;
+    const fm1_param_t *desc = groove_tone_parameter(track, pad, (unsigned)p);
+    int old = drum_value(pad, name);
+    if (old >= 0 && desc)
+        groove_tone_edit(track, pad, (unsigned)p, clampi(value, 0, desc->max) - old);
+}
+static const char *const drum_style_names[4] = {"ROCK", "HIP-HOP", "ELECTRO", "SILLY"};
+static void drum_preset(unsigned style)
+{
+    /* Distinct synthesized 808 kits, editing the built-in kick, snare, hats
+     * and percussion patches: no PCM data, and patches save with the song. */
+    static const uint8_t tuning[4][4] = {{66, 63, 61, 65}, {48, 54, 58, 54},
+                                          {76, 81, 72, 79}, {96, 36, 102, 27}};
+    static const uint8_t tails[4][4] = {{77, 104, 49, 66}, {115, 91, 37, 71},
+                                         {66, 63, 25, 47}, {116, 117, 112, 99}};
+    static const uint8_t drive[4] = {12, 35, 52, 100};
+    const uint8_t pads[4] = {0, 1, 10, 6}; /* kick, snare, closed hat, clap */
+    for (unsigned i = 0; i < 4; ++i) {
+        drum_set(pads[i], "Tune", tuning[style][i]);
+        drum_set(pads[i], "Decay", tails[style][i]);
+        drum_set(pads[i], "Drive", drive[style]);
+    }
+    drum_set(0, "Tone", style == 1 ? 22 : style == 3 ? 115 : 65);
+    drum_set(1, "Snappy", style == 1 ? 90 : style == 3 ? 120 : 65);
+    drum_set(11, "Accent", style == 3 ? 115 : 105);
+    drum_style = style;
+}
+/* FX are reversible while held. The current patch and tempo are restored
+ * when FX or its key is released; they do not write an FX automation lane. */
+static void fx_restore(void)
+{
+    if (fx_key == 255) return;
+    struct groove_view v;
+    groove_get_view(track, 0, &v);
+    groove_control_edit(track, 0, fx_volume_before - (int)v.volume, 0);
+    if (fx_bright_before >= 0 && bright_value(track) >= 0)
+        bright_edit((fx_bright_before - bright_value(track)) / 7);
+    uint8_t sends[2];
+    groove_sends_get(track, sends);
+    for (unsigned i = 0; i < 2; ++i)
+        groove_sends_edit(track, i, (int)fx_sends_before[i] - sends[i]);
+    groove_tempo_edit(fx_tempo_before - (int)groove_tempo_saved());
+    silly = (unsigned)fx_silly_before;
+    fx_key = 255;
+}
+static void fx_start(unsigned k, uint32_t now)
+{
+    if (fx_key == k) return;
+    fx_restore();
+    struct groove_view v;
+    groove_get_view(track, 0, &v);
+    fx_volume_before = v.volume;
+    fx_bright_before = bright_value(track);
+    fx_tempo_before = groove_tempo_saved();
+    fx_silly_before = (int)silly;
+    groove_sends_get(track, fx_sends_before);
+    fx_key = k;
+    fx_pulse_at = now;
+    if (k == 0) silly = SILLY_WOBBLE;        /* pitch wobble on live notes */
+    if (k == 1 && fx_bright_before >= 0) bright_edit(-3);
+    if (k == 2) groove_sends_edit(track, 1, 15 - fx_sends_before[1]);
+    if (k == 4) groove_tempo_edit(-(int)(fx_tempo_before / 2U));
+}
+static void fx_tick(uint32_t now)
+{
+    if (fx_key != 3 && fx_key != 5) return;
+    if (now - fx_pulse_at < (fx_key == 3 ? 110U : 175U)) return;
+    fx_pulse_at = now;
+    struct groove_view v;
+    groove_get_view(track, 0, &v);
+    unsigned low = (now / (fx_key == 3 ? 110U : 175U)) & 1U;
+    int target = low ? fx_volume_before / (fx_key == 3 ? 10 : 3) : fx_volume_before;
+    groove_control_edit(track, 0, target - (int)v.volume, 0);
+}
+static void record_knob_lock(unsigned value, unsigned parameter)
+{
+    if (!recording || !playing || groove_lock_parameter_count(track) <= parameter) return;
+    unsigned step = groove_sequence_record_position(track);
+    if (step >= 64) return;
+    int old = (int)groove_step_setting(track, step, 5);
+    if (old != (int)parameter + 1)
+        (void)groove_step_setting_edit(track, step, 5, (int)parameter + 1 - old);
+    old = (int)groove_step_setting(track, step, 6);
+    if (old != (int)value)
+        (void)groove_step_setting_edit(track, step, 6, (int)value - old);
 }
 /* LONG: how long notes ring after the key is let go. DX7: every operator's
  * release rate; other engines: their release/decay/length setting. */
