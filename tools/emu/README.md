@@ -25,8 +25,9 @@ The kid build also runs `--suite kids`:
 - **parent-release:** opening the parent panel releases a held note
 - **battery:** a low battery reading turns the battery icon red
 
-Every build is also checked for:
+On `main` (or with `--profile full`), the extended release checks also run:
 
+- **visual gallery:** eight instrument animations are captured and assembled into a contact sheet
 - **powercut:** after power is cut during a flash write (the first, a middle
   one, and the last of the writes the firmware makes in the test), the next
   boot still starts and plays
@@ -39,7 +40,11 @@ taken from the newest release of
 whether the two behave identically. That comparison is informational, because
 the official build can be a newer version than this repository.
 
-Results are on the run's summary page. Screenshots and audio are in the
+Pull requests run `--profile pr` by default in Actions: all functional Kids checks, including autosave/reboot, sound selection, help, key screens and animations, still run. The flash power-cut sweep and animation gallery are omitted on PRs but always run on `main` with `--profile full`. Original FM1 Open smoke tests remain enabled on both profiles.
+
+Kid tests that inspect frame transitions still record at 100 ms. Audio-only scenarios use one-second frames to preserve boot-aligned sound while reducing screenshot IO. Per-emulator wall timings are reported as `EMU_TIMING` in the logs and saved to `timings.json` with the workflow artifacts.
+
+Results are on the run's summary page. Screenshots, audio and timings are in the
 `fm1-emulator-<sha>` artifact.
 
 Run it locally (build `fm1-live` from the emulator repo with
@@ -47,7 +52,7 @@ Run it locally (build `fm1-live` from the emulator repo with
 
 ```sh
 python3 tools/emu/fm1_emu_test.py --emu PATH/fm1-live \
-    --fwsc build/dx7/generated/FM1_OFFICIAL_OPEN.fwsc --out build/emu --suite kids
+    --fwsc build/dx7/generated/FM1_OFFICIAL_OPEN.fwsc --out build/emu --suite kids --profile pr
 ```
 
 Key names for new scenarios (in `SCENARIOS`): the printed button names

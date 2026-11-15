@@ -22,6 +22,7 @@ import re
 import struct
 import subprocess
 import sys
+import time
 import zlib
 
 LCD = (370, 42, 480, 480)          # the 240x240 LCD, drawn 2x, inside fm1-live's panel picture
@@ -30,6 +31,7 @@ SILENT_PEAK = 64                   # below this the output is silence
 LOUD_PEAK = 500                    # a played note goes well above this
 NOTE_AT = 2000                     # ms: when the note scenario presses C4
 LATENCY_LIMIT = 150                # ms; a sanity bound (stock V15 measures ~75 ms in the emulator)
+RUN_TIMINGS = []                     # measured wall-clock seconds per emulator invocation
 # Power cuts: during the first flash write, one halfway, and the last one the test
 # run makes (counted from a run without a cut, so every cut lands on a real write).
 
@@ -136,13 +138,17 @@ def run(emu, fwsc, ms, keys, work, flash=None, cut=None, frames=False):
     env = dict(os.environ, FM1_BENCH_KEYS=keys, FM1_BENCH_WAV=str(work / "audio.raw"),
                FM1_BENCH_PANEL=str(work / "panel.ppm"))
     if frames:
-        env["FM1_BENCH_FRAMES"] = f"{work / 'frames'},100"
+        env["FM1_BENCH_FRAMES"] = f"{work / 'frames'},{frames if isinstance(frames, int) else 100}"
     if cut:
         env["FM1_FLASH_CUT"] = str(cut)
     cmd = [str(emu), "--fwsc", str(fwsc), "--midi", "none", "--bench", str(ms)]
     if flash:
         cmd += ["--flash", str(flash)]
+    started = time.perf_counter()
     p = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=600)
+    elapsed = round(time.perf_counter() - started, 3)
+    RUN_TIMINGS.append({"scenario": work.name, "seconds": elapsed, "emulated_ms": ms, "frame_interval_ms": int(frames) if frames else 0})
+    print(f"EMU_TIMING {work.parent.name}/{work.name}: {elapsed:.3f}s ({ms}ms simulated; frames every {int(frames) if frames else 0}ms)", flush=True)
     log = p.stdout + p.stderr
     (work / "emulator.log").write_text(log)
     problems = []
@@ -165,7 +171,7 @@ def check(name, emu, fwsc, out):
     """Run one scenario; returns (checks, artefacts)."""
     _, ms, keys, _ = next(s for s in SCENARIOS if s[0] == name)
     work = out / name
-    r = run(emu, fwsc, ms, keys, work, frames=(name in ("seq", "note", "beat")))
+    r = run(emu, fwsc, ms, keys, work, frames=100 if name in ("seq", "note", "beat") else False)
     checks = [("emulator ran cleanly", not r["problems"], "; ".join(r["problems"]) or "ok")]
     if r["lcd"]:
         n = colours(r["lcd"])
@@ -258,7 +264,12 @@ def onsets(work, start_ms, end_ms):
 
 
 def kid_run(emu, fwsc, out, name, ms, keys, flash=None):
-    r = run(emu, fwsc, ms, keys, out / name, flash=flash, frames=True)
+    # Keep boot-aligned audio for every behavioral test, but only capture
+    # 100 ms screenshots where tests actually inspect frame transitions.
+    # Audio-only scenarios retain a 1-second cadence (10x fewer PPM frames).
+    visual = (name in ("songs", "sparks", "sparks-song", "learn", "help", "picker", "battery")
+              or name.startswith(("instruments-", "bass-", "playful-sounds-", "sparks-")))
+    r = run(emu, fwsc, ms, keys, out / name, flash=flash, frames=100 if visual else 1000)
     if r["lcd"]:
         write_png(out / f"{name}.png", r["lcd"])
     write_wav(out / f"{name}.wav", r["raw"])
@@ -271,7 +282,7 @@ def heard(work, start, end, loud=True):
     return ok, f"peak {pk} at {start / 1000:g}-{end / 1000:g} s"
 
 
-def kid_checks(emu, fwsc, out):
+def kid_checks(emu, fwsc, out, profile="full"):
     results = {}
     name = "parent-release"
     r, c = kid_run(emu, fwsc, out, name, 7000,
@@ -361,27 +372,28 @@ def kid_checks(emu, fwsc, out):
         frames = []
     c += [("the song makes the pictures move", len(set(frames)) >= 4, f"{len(set(frames))} different frames in 1.6 s")]
     results[name] = c
-    # Gallery: each kind of animation, frame by frame (sparks-gallery.png; also
-    # printed to the log as base64 so it can be looked at without the artifact).
-    rows = []
-    for label, turns in (("piano", ""), ("trumpet", "2000:e1:2,"), ("bells", "2000:e1:6,"), ("bass", "2000:e1:9,"),
-                         ("robot", "2000:e1:10,"), ("dream", "2000:e1:11,"), ("game", "2000:e1:12,"), ("drums", "2000:e1:14,")):
-        kid_run(emu, fwsc, out, f"{name}-{label}", 3800, turns + "3000:C4@110,3300:C4^")
-        row = []
-        for ms in (2900, 3000, 3100, 3200, 3300, 3400, 3600):
-            try:
-                row.append(crop(read_ppm(out / f"{name}-{label}" / "frames" / f"{ms // 100:06d}.ppm"),
-                                (LCD[0], LCD[1] + 80, 130, 160)))
-            except (FileNotFoundError, IndexError):
-                row.append((130, 160, b"\0" * 130 * 160 * 3))
-        rows.append(row)
-    sw, sh = 130 * 7, 160 * len(rows)
-    px = b"".join(b"".join(cell[2][r * 390:(r + 1) * 390] for cell in row) for row in rows for r in range(160))
-    write_png(out / "sparks-gallery.png", (sw, sh, px))
-    import base64
-    print("GALLERY-PNG-BEGIN")
-    print(base64.b64encode((out / "sparks-gallery.png").read_bytes()).decode())
-    print("GALLERY-PNG-END")
+    if profile == "full":
+        # Gallery: each kind of animation, frame by frame (sparks-gallery.png; also
+        # printed to the log as base64 so it can be looked at without the artifact).
+        rows = []
+        for label, turns in (("piano", ""), ("trumpet", "2000:e1:2,"), ("bells", "2000:e1:6,"), ("bass", "2000:e1:9,"),
+                             ("robot", "2000:e1:10,"), ("dream", "2000:e1:11,"), ("game", "2000:e1:12,"), ("drums", "2000:e1:14,")):
+            kid_run(emu, fwsc, out, f"{name}-{label}", 3800, turns + "3000:C4@110,3300:C4^")
+            row = []
+            for ms in (2900, 3000, 3100, 3200, 3300, 3400, 3600):
+                try:
+                    row.append(crop(read_ppm(out / f"{name}-{label}" / "frames" / f"{ms // 100:06d}.ppm"),
+                                    (LCD[0], LCD[1] + 80, 130, 160)))
+                except (FileNotFoundError, IndexError):
+                    row.append((130, 160, b"\0" * 130 * 160 * 3))
+            rows.append(row)
+        sw, sh = 130 * 7, 160 * len(rows)
+        px = b"".join(b"".join(cell[2][r * 390:(r + 1) * 390] for cell in row) for row in rows for r in range(160))
+        write_png(out / "sparks-gallery.png", (sw, sh, px))
+        import base64
+        print("GALLERY-PNG-BEGIN")
+        print(base64.b64encode((out / "sparks-gallery.png").read_bytes()).decode())
+        print("GALLERY-PNG-END")
     # Play along: a tune from the ENV list; only the right key moves it on.
     name = "learn"
     r, c = kid_run(emu, fwsc, out, name, 6000, "2000:ENV,2100:ENV^,2300:e0:17,2600:PLAY,2700:PLAY^,"
@@ -587,14 +599,16 @@ def kid_checks(emu, fwsc, out):
     return results
 
 
-def test(emu, fwsc, out, suite="generic"):
+def test(emu, fwsc, out, suite="generic", profile="full"):
     out.mkdir(parents=True, exist_ok=True)
     results, digests = {}, {}
     for name, *_ in SCENARIOS:
         results[name], digests[name] = check(name, emu, fwsc, out)
-    results["powercut"] = power_cuts(emu, fwsc, out)
+    # Full flash-recovery coverage is reserved for main/release runs.
+    if profile == "full":
+        results["powercut"] = power_cuts(emu, fwsc, out)
     if suite == "kids":
-        results.update(kid_checks(emu, fwsc, out))
+        results.update(kid_checks(emu, fwsc, out, profile))
     return results, digests
 
 
@@ -605,15 +619,21 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--reference")
     ap.add_argument("--reference-label", help="how to name the reference in the summary")
+    ap.add_argument("--profile", choices=["pr", "full"], default="full",
+                    help="pr: functional checks with lean capture; full: also flash power cuts and visual galleries")
     ap.add_argument("--suite", choices=["generic", "kids"], default="generic",
                     help="kids: also test FM1 Kids behaviours (start over, help, songs, learn, keys, silly, parts, sparks, quiet, picker, instruments, sound edit, autosave, arpeggiator, battery)")
     a = ap.parse_args()
     out = pathlib.Path(a.out)
-    results, digests = test(a.emu, a.fwsc, out / "build", a.suite)
-    ref = test(a.emu, a.reference, out / "reference") if a.reference else None
+    RUN_TIMINGS.clear()
+    started = time.perf_counter()
+    results, digests = test(a.emu, a.fwsc, out / "build", a.suite, a.profile)
+    ref = test(a.emu, a.reference, out / "reference", profile=a.profile) if a.reference else None
+    wall_seconds = round(time.perf_counter() - started, 3)
 
     failed = [(s, c) for s, cs in results.items() for c in cs if not c[1]]
     lines = [f"## FM-1 emulator test: {'PASS' if not failed else 'FAIL'}", "",
+             f"Profile: **{a.profile}** · Total emulator test wall time: **{wall_seconds:.1f}s**", "",
              f"Firmware: `{pathlib.Path(a.fwsc).name}` (sha256 `{hashlib.sha256(pathlib.Path(a.fwsc).read_bytes()).hexdigest()[:16]}`)", "",
              "| Scenario | Check | Result | Detail |", "|---|---|---|---|"]
     for s, cs in results.items():
@@ -633,15 +653,19 @@ def main():
             if digests[s].get("latency") is not None and ref_digests[s].get("latency") is not None:
                 audio += f"; key to sound {digests[s]['latency']:.1f} ms vs {ref_digests[s]['latency']:.1f} ms"
             lines.append(f"| {s} | {screen} | {audio} | {'pass' if ref_ok else 'FAIL'} |")
-        ref_pc = all(c[1] for c in ref_results["powercut"])
-        lines.append(f"| powercut | | | {'pass' if ref_pc else 'FAIL'} |")
-    lines += ["", "Screenshots (PNG) and audio (WAV) for each scenario are in the run's artifact."]
+        if "powercut" in ref_results:
+            ref_pc = all(c[1] for c in ref_results["powercut"])
+            lines.append(f"| powercut | | | {'pass' if ref_pc else 'FAIL'} |")
+    lines += ["", "Functional results include audio (WAV); frame capture is sparse for audio-only tests.",
+              f"Timed {len(RUN_TIMINGS)} emulator invocations; individual wall times are in timings.json."]
     summary = "\n".join(lines) + "\n"
     (out / "summary.md").write_text(summary)
+    (out / "timings.json").write_text(json.dumps({"profile": a.profile, "wall_seconds": wall_seconds,
+                                                  "runs": RUN_TIMINGS}, indent=2))
     (out / "results.json").write_text(json.dumps({"build": {s: [list(c) for c in cs] for s, cs in results.items()},
                                                   "digests": digests,
                                                   "reference": ref and ref[1]}, indent=1))
-    print(summary)
+    print(summary, flush=True)
     sys.exit(1 if failed else 0)
 
 
