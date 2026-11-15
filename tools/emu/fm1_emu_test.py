@@ -477,6 +477,32 @@ def kid_checks(emu, fwsc, out, profile="full"):
           differ("BELLS has its own picture and voice", "trumpet", "bells"),
           differ("SOUND moves to another trumpet voice", "trumpet", "trumpet-2")]
     results[name] = c
+    # DRUM FUN: 808 sound must change when kit style and controls move.
+    name = "drum-fun"
+    base, clean = kid_run(emu, fwsc, out, name + "-baseline", 5400,
+                          "2000:e1:14,3500:C4@100,4200:C4^")
+    edited, edited_clean = kid_run(emu, fwsc, out, name + "-edit", 5400,
+        "2000:e1:14,2300:EDIT,2400:EDIT^,2500:EDIT,2600:EDIT^,"
+        "2700:EDIT,2800:EDIT^,3000:e1:2,3200:e2:20,"
+        "3500:C4@100,4200:C4^")
+    c = [("both drum takes run", clean[0][1] and edited_clean[0][1], "baseline and modified kit"),
+         ("synthesized drum preset changes sound", 
+          bool(base["raw"]) and base["raw"] != edited["raw"], "audio comparison"),
+         ("drum takes make sound", *heard(out / (name + "-baseline"), 3600, 4300))]
+    results[name] = c
+    # Playable FX: toggle a stutter while the loop runs and check that audio changes.
+    name = "live-fx"
+    base, clean = kid_run(emu, fwsc, out, name + "-baseline", 6000,
+                          PATTERN + ",2200:PLAY,2300:PLAY^")
+    effected, fx_clean = kid_run(emu, fwsc, out, name + "-stutter", 6000,
+        PATTERN + ",2200:PLAY,2300:PLAY^,3000:FX,3200:B3,4900:B3^,5100:FX^")
+    a = (out / (name + "-baseline") / "frames" / "audio.raw").read_bytes()
+    b = (out / (name + "-stutter") / "frames" / "audio.raw").read_bytes()
+    begin, end = 3500 * RATE // 1000 * 4, 4900 * RATE // 1000 * 4
+    c = [("both FX takes run", clean[0][1] and fx_clean[0][1], "plain and stutter"),
+         ("live FX changes the playing rhythm", a[begin:end] != b[begin:end],
+          "same pattern produces different audio while FX held")]
+    results[name] = c
     # The additional kid-friendly choices expose embedded DX7 voices; they
     # must each play, have different voices, and move through their own group.
     name = "playful-sounds"
