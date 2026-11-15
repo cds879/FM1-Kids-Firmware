@@ -1588,6 +1588,10 @@ void groove_screen_control(void)
     knobs_read(&c, now);
     groove_master_update(c.knob < KID_MASTER_LIMIT ? c.knob : KID_MASTER_LIMIT);
     uint32_t pressed = c.buttons & ~previous_buttons;
+    if (pressed & BUTTON(FX)) {
+        fx_started = now | 1U; fx_touched = 0;
+        fx_start(6, now); /* snapshot original settings for temporary knobs too */
+    }
     uint32_t key_down = c.keys & ~previous_keys;
     unsigned turned = 0;
     for (unsigned e = 0; e < 7; ++e) turned |= c.encoders[e] != 0;
@@ -1662,6 +1666,7 @@ void groove_screen_control(void)
     arp_panel = (c.buttons & BUTTON(ARP)) != 0;
     if (fx_started) {
         /* The four knobs become temporary effect controls while FX is held. */
+        if (c.encoders[2] || c.encoders[3] || c.encoders[4] || c.encoders[5]) fx_touched = 1;
         if (c.encoders[2]) groove_control_edit(track, 0, fast(&c, 2), 0);
         if (c.encoders[3]) bright_edit(fast(&c, 3));
         if (c.encoders[4]) groove_sends_edit(track, 1, c.encoders[4]);
@@ -1749,13 +1754,12 @@ void groove_screen_control(void)
     unsigned old_mode = mode;
     /* FX held: play six effects with the first six white keys. A tap with
      * no effect keeps the existing two-tap START OVER shortcut. */
-    if (pressed & BUTTON(FX)) { fx_started = now | 1U; fx_touched = 0; }
     if (fx_started && (c.buttons & BUTTON(FX))) {
         static const unsigned fx_keys[6] = {0, 2, 4, 6, 7, 9};
         unsigned chosen = 255;
         for (unsigned k = 0; k < 6; ++k) if (c.keys & (1U << fx_keys[k])) { chosen = k; break; }
         if (chosen < 6) { fx_touched = 1; fx_start(chosen, now); }
-        else fx_restore();
+        else if (fx_key < 6) fx_start(6, now); /* key released: keep FX-knob snapshot */
         fx_tick(now);
         if (chosen < 6) key_down &= ~(1U << fx_keys[chosen]);
     }
