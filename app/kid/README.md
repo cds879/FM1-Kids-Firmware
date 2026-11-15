@@ -144,3 +144,13 @@ Only the right key moves on; any key still plays. At the end it says YAY! and
 goes back to normal. HOME stops early. While playing along the keys use DO RE
 MI (every white key as printed) and chords are off; the earlier scale, chords
 and octave come back afterwards. Opening ENV also leaves Play Along.
+
+## Drum Fun and playable effects (1.6)
+
+On a DRUMS track, press **EDIT** three times to open **DRUM FUN**. The four knobs control **PUNCH** (808 kit accent), **PITCH** (selected drum tune), **LENGTH** (decay), and **WEIRD** (drive/distortion). Use PRESETS to select a drum pad; use ALGORITHM to choose **ROCK**, **HIP-HOP**, **ELECTRO**, or **SILLY**. These are four variations of the existing synthesized 808 voices (kick/snare/hats/clap), **not** a port of JIANT's DRUM-X engine or sample packs. They edit real synthesis parameters and persist with a saved project.
+
+Hold **FX** to bring up **SILLY FX**. The first six white keys (F3, G3, A3, B3, C4, D4) choose **WOBBLE** (live-note/sequence pitch bend), **ROBOT** (darker tone), **ECHO** (more delay send), **STUTTER** (rhythmic volume chops), **SLOW** (half tempo), and **GLITCH** (irregular-sounding volume chops). Release the key or FX to restore the previous settings. While FX is held, knobs control **LOUD**, **BRIGHT**, **ECHO**, and **REVERB** temporarily. Tap FX without a note twice to retain the existing start-over confirmation/clear shortcut.
+
+When REC is active during playback, changes to **LOUD** on 808 tracks and **BRIGHT** on melodic tracks are written as parameter locks at the current sequencer step. This adds recorded variation to patterns within the existing lock system. Per-drum tune/decay automation and recording of the temporary FX are not yet supported by that lock system.
+
+On Drum Fun, the selected drum's tuning, decay and drive bars visually track knob movement; the kit preset name identifies the selected sound family.
