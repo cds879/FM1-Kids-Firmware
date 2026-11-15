@@ -629,6 +629,7 @@ static void fx_restore(void)
     groove_tempo_edit(fx_tempo_before - (int)groove_tempo_saved());
     silly = (unsigned)fx_silly_before;
     fx_key = 255;
+    /* Straighten any pitch-bend on the next control tick. */
 }
 static void fx_start(unsigned k, uint32_t now)
 {
@@ -654,7 +655,7 @@ static void fx_start(unsigned k, uint32_t now)
     groove_sends_get(track, fx_sends_before);
     fx_key = k;
     fx_pulse_at = now;
-    if (k == 0) silly = SILLY_WOBBLE;        /* pitch wobble on live notes */
+    if (k == 0) { silly = SILLY_WOBBLE; bend_at = now; } /* pitch wobble over sequenced notes */
     if (k == 1 && fx_bright_valid) bright_edit(-(int)(fx_bright_raw / 2U));
     if (k == 2) groove_sends_edit(track, 1, 15 - fx_sends_before[1]);
     if (k == 4) groove_tempo_edit(-(int)(fx_tempo_before / 2U));
@@ -1479,7 +1480,7 @@ static void silly_tick(uint32_t now)
     unsigned held = 0;
     for (unsigned k = 0; k < 27; ++k) held |= key_note[k] != 0xff && key_track[k] == track;
     unsigned want = 8192, ch = groove_midi_input_channel(track);
-    if (silly && held && !drum_track(track)) {
+    if (silly && (held || (fx_started && fx_key == 0 && playing)) && !drum_track(track)) {
         int t = (int)(now - bend_at), v = 0;
         switch (silly) {
         case SILLY_WOBBLE: v = tri((uint32_t)t, 160) * 2; break;                         /* vibrato */
