@@ -480,9 +480,9 @@ def kid_checks(emu, fwsc, out, profile="full"):
     # DRUM FUN: 808 sound must change when kit style and controls move.
     name = "drum-fun"
     base, clean = kid_run(emu, fwsc, out, name + "-baseline", 5400,
-                          "2000:e1:14,3500:C4@100,4200:C4^")
+                          "1000:e1:14,3500:C4@100,4200:C4^")
     edited, edited_clean = kid_run(emu, fwsc, out, name + "-edit", 5400,
-        "2000:e1:14,2300:EDIT,2400:EDIT^,2500:EDIT,2600:EDIT^,"
+        "1000:e1:14,2300:EDIT,2400:EDIT^,2500:EDIT,2600:EDIT^,"
         "2700:EDIT,2800:EDIT^,3000:e1:2,3200:e2:20,"
         "3500:C4@100,4200:C4^")
     c = [("both drum takes run", clean[0][1] and edited_clean[0][1], "baseline and modified kit"),
