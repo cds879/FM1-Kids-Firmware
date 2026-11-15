@@ -83,22 +83,25 @@ static uint32_t bend_at;
 /* Kid instruments: what the picker offers and the tiles show. Several use the
  * DX7 engine with a chosen factory voice; the others are whole engines. */
 enum { I_PIANO, I_ORGAN, I_TRUMPET, I_FLUTE, I_VIOLIN, I_CHOIR, I_BELLS, I_XYLO,
-       I_GUITAR, I_BASS, I_ROBOT, I_DREAM, I_GAME, I_FUN, I_DRUMS, I_COUNT };
+       I_GUITAR, I_BASS, I_ROBOT, I_DREAM, I_GAME, I_FUN, I_DRUMS,
+       I_MAGIC, I_SPACE, I_SFX, I_COUNT };
 static const char *const kind_name[I_COUNT] = {"PIANO", "ORGAN", "TRUMPET", "FLUTE", "VIOLIN", "CHOIR",
                                                "BELLS", "XYLOPHONE", "GUITAR", "BASS", "ROBOT", "DREAM",
-                                               "GAME", "FUN", "DRUMS"};
+                                               "GAME", "FUN", "DRUMS", "MAGIC", "SPACE", "SFX"};
 /* Engine and starting DX7 voice for each (0xff: not DX7). Swap voices freely. */
 static const struct { uint8_t engine, program; } kind_sound[I_COUNT] = {
     {GROOVE_DX7, 0},   {GROOVE_DX7, 1},    {GROOVE_DX7, 64},  {GROOVE_DX7, 65},   {GROOVE_DX7, 66},
     {GROOVE_DX7, 67},  {GROOVE_DX7, 120},  {GROOVE_DX7, 117}, {GROOVE_PLUCK, 0xff}, {GROOVE_DX7, 34},
-    {GROOVE_DX7, 2},   {GROOVE_DX7, 3},    {GROOVE_PSG, 0xff}, {GROOVE_SAMPLE, 0xff}, {GROOVE_808, 0xff}};
+    {GROOVE_DX7, 2},   {GROOVE_DX7, 3},    {GROOVE_PSG, 0xff}, {GROOVE_SAMPLE, 0xff}, {GROOVE_808, 0xff},
+    {GROOVE_DX7, 100}, {GROOVE_DX7, 99}, {GROOVE_DX7, 96}};
 /* A second engine SOUND moves on to: guitar goes pluck -> DX7 guitars,
  * bass goes DX7 basses -> the 303 bass line. */
 static const uint8_t kind_other[I_COUNT] = {
-    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, GROOVE_DX7, GROOVE_303, 0xff, 0xff, 0xff, 0xff, 0xff};
+    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, GROOVE_DX7, GROOVE_303, 0xff, 0xff, 0xff, 0xff, 0xff,
+    0xff, 0xff, 0xff};
 /* Pictures: 16x12 drawn 3x, or 24x18 drawn 2x (same size on screen); the
  * leftmost pixel is the highest used bit. Order follows the kid instruments. */
-static const struct { uint8_t w, h; uint32_t rows[18]; } kind_icon[I_COUNT] = {
+static const struct { uint8_t w, h; uint32_t rows[18]; } kind_icon[I_DRUMS + 1] = {
     /* PIANO */ {16, 12, {0x0000, 0xffff, 0x96b5, 0x96b5, 0x96b5, 0x96b5, 0xddb7, 0xddb7, 0xddb7, 0xffff, 0x0000, 0x0000}},
     /* ORGAN */ {24, 18, {0x003000, 0x01b600, 0x01b600, 0x01b600, 0x0db6c0, 0x0db6c0, 0x0db6c0, 0x6db6d8, 0x6db6d8,
                          0x6db6d8, 0x492490, 0x6db6d8, 0x6db6d8, 0xffffff, 0xffffff, 0xdb6db6, 0xdb6db6, 0xffffff}},
@@ -194,7 +197,10 @@ static const struct { uint8_t move, spark; } kind_anim[I_COUNT] = {
     {M_STRUM, P_NOTE}, /* GUITAR: strums */               {M_RUMBLE, P_RING},  /* BASS: rumbles, waves */
     {M_BLINK, P_PIXEL},/* ROBOT: blinks, bits */          {M_SWING, P_STAR},   /* DREAM: floats, twinkles */
     {M_STEP, P_PIXEL}, /* GAME: jumps in steps, pixels */ {M_HOP, P_STAR},     /* FUN */
-    {M_HOP, P_BANG}};  /* DRUMS: jump, bang! */
+    {M_HOP, P_BANG},   /* DRUMS: jump, bang! */
+    {M_SWING, P_STAR}, /* MAGIC: sparkles */
+    {M_SWING, P_PIXEL},/* SPACE: drifting pixels */
+    {M_BLINK, P_BANG}};/* SFX: surprises */
 static struct { uint8_t note, track, kind; uint32_t at; } sparks[SPARKS];
 static unsigned spark_next;
 static uint32_t hit_at[GROOVE_TRACKS];  /* when each instrument last started a note */
@@ -312,6 +318,10 @@ static void text_center(unsigned x, unsigned w, unsigned y, const char *s, unsig
 /* An instrument picture, 48x36 on screen (or 32x24 with small). */
 static void picture(unsigned x, unsigned y, unsigned k, unsigned small, uint16_t color)
 {
+    /* New sound groups share artwork rather than allocating more bitmaps. */
+    if (k == I_MAGIC) k = I_BELLS;
+    else if (k == I_SPACE) k = I_DREAM;
+    else if (k == I_SFX) k = I_ROBOT;
     unsigned w = kind_icon[k].w, h = kind_icon[k].h;
     unsigned scale = (w == 24 ? 2U : 3U) - (small ? 1U : 0U);
     if (y >= paint_top + PAINT_ROWS || y + h * scale <= paint_top) return;
@@ -346,16 +356,20 @@ static void say(const char *s, uint16_t color, uint32_t now)
 }
 static unsigned drum_track(unsigned t) { return groove_pad_count(t) != 0; }
 static unsigned kind(unsigned t) { unsigned k = groove_source_type(t); return k < GROOVE_SOURCES ? k : 0; }
+/* MAGIC (100,101,104,106,108,112,116,118), SPACE (99,111,124),
+ * and SFX (96,97,102,103,107,110,115,119,121,123,126,127) reuse
+ * embedded factory DX7 patches: no downloads, PCM samples or extra engines. */
 /* Which kid instrument a DX7 voice sounds like (the factory bank repeats in fours). */
 static unsigned voice_look(unsigned p)
 {
     static const uint8_t low[4] = {I_PIANO, I_ORGAN, I_ROBOT, I_DREAM}, high[4] = {I_TRUMPET, I_FLUTE, I_VIOLIN, I_CHOIR};
     /* 96..127, the odd ones: bells and metal, tuned wood and drums, dreamy, the rest robots. */
+    /* Factory oddball patches, now browsable directly. TUB BELLS stays BELLS. */
     static const uint8_t odd[32] = {
-        I_ROBOT, I_ROBOT, I_XYLO,  I_DREAM, I_BELLS, I_BELLS, I_ROBOT, I_ROBOT,   /*  96 BOWOAN .. 103 MONO M */
-        I_BELLS, I_XYLO,  I_BELLS, I_ROBOT, I_BELLS, I_XYLO,  I_ROBOT, I_DREAM,   /* 104 TIBET .. 111 DESCENT */
-        I_BELLS, I_XYLO,  I_XYLO,  I_ROBOT, I_BELLS, I_XYLO,  I_BELLS, I_ROBOT,   /* 112 CLANG BELL .. 119 */
-        I_BELLS, I_ROBOT, I_XYLO,  I_ROBOT, I_DREAM, I_XYLO,  I_ROBOT, I_ROBOT};  /* 120 TUB BELLS .. 127 */
+        I_SFX, I_SFX, I_XYLO, I_SPACE, I_MAGIC, I_MAGIC, I_SFX, I_SFX,
+        I_MAGIC, I_XYLO, I_MAGIC, I_SFX, I_MAGIC, I_XYLO, I_SFX, I_SPACE,
+        I_MAGIC, I_XYLO, I_XYLO, I_SFX, I_MAGIC, I_XYLO, I_MAGIC, I_SFX,
+        I_BELLS, I_SFX, I_XYLO, I_SFX, I_SPACE, I_XYLO, I_SFX, I_SFX};
     if (p < 32) return low[p % 4U];
     if (p < 64) return p % 4U < 2 ? I_GUITAR : I_BASS;
     if (p < 96) return high[p % 4U];
