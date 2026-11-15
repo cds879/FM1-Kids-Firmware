@@ -2,14 +2,15 @@
 
 A simple interface for young children that replaces M-VAVE's FM1 Open
 screens. The sound engines, sequencer, saving and firmware updates are
-M-VAVE's, unchanged.
+M-VAVE's, unchanged. MAGIC, SPACE and SFX are ready to play after flashing;
+no separate patch import is required.
 
 ## How to play
 
 | Control | What it does |
 |---|---|
 | **SELECT** knob | Pick a tile. Each tile shows its instrument's picture and name |
-| **ALGORITHM** knob | Change the chosen tile's instrument: piano, organ, trumpet, flute, violin, choir, bells, xylophone, guitar, bass, robot, dream, game (chiptune), fun (samples) or drums. It switches when the knob rests |
+| **ALGORITHM** knob | Change the chosen tile's instrument: piano, organ, trumpet, flute, violin, choir, bells, xylophone, guitar, bass, robot, dream, game (chiptune), fun (samples) drums, magic, space or SFX. It switches when the knob rests |
 | **Piano keys** | Play the instrument. On melodic instruments every key fits the scale (HAPPY, a C major pentatonic, to start; see EDIT) |
 | *(fun)* | Every note played floats up its tile as a little coloured note; each tile's picture dances and shows a loudness bar while it sounds, also when the song plays it |
 | **SEQ** | BEAT mode: white keys switch the 16 steps on and off; black keys pick the drum (or note) to place. Other drums show as dots; melody steps show their note by colour and height |
@@ -85,6 +86,9 @@ from the 128 factory voices. They are set in `kind_sound` in
 | GAME | chiptune (PSG) | |
 | FUN | sampler | |
 | DRUMS | 808 drums | |
+| MAGIC | DX7 | 101 (factory oddball/bell group) |
+| SPACE | DX7 | 100 (factory atmospheric group) |
+| SFX | DX7 | 97 (factory unusual synth sounds) |
 
 SOUND steps through every version of the same instrument, and the picture
 always matches what is playing (`voice_look`):
@@ -103,6 +107,13 @@ always matches what is playing (`voice_look`):
 | CHOIR | the 8 voices |
 | BELLS | FROGBELL, ELECT.GONG, TIBET, COWBELL, FINGERCYM, CLANG BELL, BI BEN, GAMALONG, TUB BELLS |
 | XYLOPHONE | BLOCK, LOG DRUM, TIMPANI, STEEL DRUM, CONGA, KALIMBA, TOM TOMS, TIMBALI |
+| MAGIC | 8 built-in DX7 metallic/bell oddities, selected with SOUND |
+| SPACE | 3 built-in atmospheric oddities, selected with SOUND |
+| SFX | 12 built-in unusual effects and synth oddities, selected with SOUND |
+
+## Drum feel and extra sounds
+
+Newly placed drum steps have automatic accents: main beats (115), secondary beats (94), and offbeats (76). Existing programmed steps are not rewritten. The 11-voice 808 kit remains unchanged. MAGIC, SPACE and SFX make 23 existing factory DX7 sounds easy to find with ALGORITHM and SOUND; they do not add new waveforms, sample downloads or a larger audio engine. Three groups share the existing icon art to conserve space.
 
 ## Songs
 
