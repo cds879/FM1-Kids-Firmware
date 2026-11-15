@@ -886,6 +886,12 @@ static uint32_t signature(unsigned e)
                      groove_arp_setting(i, 5) << 9 | shown_kind(i) << 10;
         s = mix(s, v.audible ? v.level / 8U + 1U : 0);
         if (hit_at[i] && clock_now - hit_at[i] < MOVE_MS) s = mix(s, (clock_now - hit_at[i]) / 30U + 1U);
+        if (i == track && fx_started) s = mix(s, 0x60000U | fx_key << 8 | (clock_now / 85U & 7U));
+        if (i == track && drum_track(i) && sound_panel == 3)
+            s = mix(s, (unsigned)(drum_value(drum, "Tune") + 1) | 
+                       (unsigned)(drum_value(11, "Accent") + 1) << 8 |
+                       (unsigned)(drum_value(drum, "Drive") + 1) << 16);
+
         for (unsigned k = 0; k < SPARKS; ++k)
             if (sparks[k].at && sparks[k].track == i && clock_now - sparks[k].at < SPARK_MS)
                 s = mix(mix(s, sparks[k].note), (clock_now - sparks[k].at) / 25U + 1U);
@@ -1208,6 +1214,27 @@ static void draw_tile(unsigned i, unsigned x, unsigned y, unsigned w, unsigned h
         uint32_t age = clock_now - sparks[k].at;
         if (!sparks[k].at || sparks[k].track != i || age >= SPARK_MS) continue;
         draw_spark(kind_anim[look_i].spark, sparks[k].note, age, (int)x, (int)y, w, h, selected ? INK : c);
+    }
+    /* The drum's character and live FX visibly follow the physical knobs,
+     * rather than animating only on note triggers. */
+    if (i == track && drum_track(i) && sound_panel == 3) {
+        int punch = drum_value(11, "Accent");
+        int pitch = drum_value(drum, "Tune");
+        int drive = drum_value(drum, "Drive");
+        int height = pitch < 0 ? 4 : 4 + pitch * 14 / 127;
+        unsigned pulse = (clock_now / 90U) & 3U;
+        cfill((int)x + 8, (int)y + 12 + (int)pulse, 3 + (punch < 0 ? 0 : punch * 18 / 127), 3, INK);
+        cfill((int)x + 8, (int)y + 36 - height, 4, height, kid_colors[2]);
+        if (drive > 50) {
+            cfill((int)x + 38 + (int)pulse * 2, (int)y + 22, 5, 5, kid_colors[1]);
+            cfill((int)x + 40 - (int)pulse * 2, (int)y + 34, 4, 4, INK);
+        }
+    }
+    if (i == track && fx_started && fx_key < 6) {
+        int p = (int)(clock_now / 85U % 5U);
+        cfill((int)x + 9 + p * 6, (int)y + 9, 9, 3, kid_colors[5]);
+        if (fx_key == 2) cfill((int)x + 22, (int)y + 35 - p * 3, 15 + p * 2, 3, INK);
+        else if (fx_key == 3 || fx_key == 5) cfill((int)x + 12, (int)y + 36, (p & 1) ? 34 : 15, 4, INK);
     }
     for (unsigned k = 0; k < 27; ++k)
         if (key_note[k] != 0xff && key_track[k] == i) { fill(x + w - 12, y + 6, 7, 7, INK); break; }
