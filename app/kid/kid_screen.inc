@@ -1772,6 +1772,7 @@ void groove_screen_control(void)
         if (pressed & BUTTON(FX)) {
             confirm_until = 0;
             say(groove_edit_clear(track, 0, 2) ? "OOPS" : "CLEARED", kid_colors[0], now);
+            fx_touched = 1; /* consuming the second tap must not re-arm on release */
             pressed &= ~BUTTON(FX);
         } else if (pressed || key_down || turned || (int32_t)(now - confirm_until) >= 0) {
             confirm_until = 0;
