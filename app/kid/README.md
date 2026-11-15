@@ -113,7 +113,7 @@ always matches what is playing (`voice_look`):
 
 ## Drum feel and extra sounds
 
-Newly placed drum steps have automatic accents: main beats (115), secondary beats (94), and offbeats (76). Existing programmed steps are not rewritten. The 11-voice 808 kit remains unchanged. MAGIC, SPACE and SFX make 23 existing factory DX7 sounds easy to find with ALGORITHM and SOUND; they do not add new waveforms, sample downloads or a larger audio engine. Three groups share the existing icon art to conserve space.
+Newly placed drum steps have automatic accents: main beats (115), secondary beats (94), and offbeats (76). Existing programmed steps are not rewritten. The 11-voice 808 kit remains unchanged. MAGIC, SPACE and SFX make 23 existing factory DX7 sounds easy to find with ALGORITHM and SOUND; they do not add new waveforms, sample downloads or a larger audio engine. The three groups now have distinct 16x12 pixel sprites and note animations: a sparkling wand (MAGIC), a hovering saucer with a light beam (SPACE), and a shaking comic impact with electric bolts (SFX). The effects use simple drawing primitives without image assets.
 
 ## Songs
 
