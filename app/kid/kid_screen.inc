@@ -457,7 +457,14 @@ static void toggle_step(unsigned step)
     unsigned note = drum_track(track) ? groove_pad_note(track, drum) : beat_note;
     uint8_t notes[3];
     if (!on && chords && !drum_track(track)) groove_sequence_chord(track, step, notes, chord_notes(note, notes), 100);
-    else groove_sequence_edit(track, step, note, on ? 0 : 100);
+    else {
+        /* The 808 uses one velocity per step, shared by all active drums.
+         * Give the downbeats a strong pulse and offbeats a gentler touch.
+         * No new samples or DSP code, and existing patterns stay untouched. */
+        unsigned beat = step % KID_STEPS;
+        unsigned velocity = drum_track(track) ? (beat % 4U == 0 ? 115U : beat % 2U == 0 ? 94U : 76U) : 100U;
+        groove_sequence_edit(track, step, note, on ? 0 : velocity);
+    }
 }
 /* The scale note at or below a pitch. */
 static unsigned snap(unsigned note, uint16_t set)
