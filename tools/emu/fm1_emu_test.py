@@ -490,6 +490,25 @@ def kid_checks(emu, fwsc, out, profile="full"):
           bool(base["raw"]) and base["raw"] != edited["raw"], "audio comparison"),
          ("drum takes make sound", *heard(out / (name + "-baseline"), 3600, 4300))]
     results[name] = c
+    # Hardware DRUM-X sidecar: ENV on the third EDIT screen swaps 808 audition
+    # for eight-lane synthesis. Check it actually emits audio, not just UI.
+    name = "drumx-sidecar"
+    keys = ("1000:e1:14,2300:EDIT,2400:EDIT^,2500:EDIT,2600:EDIT^,"
+            "2700:EDIT,2800:EDIT^,3000:ENV,3100:ENV^,"
+            "3500:C4@100,4200:C4^")
+    dx, check = kid_run(emu, fwsc, out, name, 5400, keys)
+    try:
+        dx_peak = heard(out / name, 3500, 4500)
+        raw = (out / name / "frames" / "audio.raw").read_bytes()
+        plain = (out / "drum-fun-baseline" / "frames" / "audio.raw").read_bytes()
+        section = slice(3500 * RATE // 1000 * 4, 4300 * RATE // 1000 * 4)
+        distinct = raw[section] != plain[section]
+    except (FileNotFoundError, OSError):
+        dx_peak = ("DRUM-X plays", False, "missing audio capture")
+        distinct = False
+    results[name] = [("emulator completed", check[0][1], "Kids UI DRUM-X preview"),
+                     ("sidecar synthesizer audible", *dx_peak),
+                     ("DRUM-X changes synthesized kit", distinct, "PCM differs from 808")]
     # Playable FX: toggle a stutter while the loop runs and check that audio changes.
     name = "live-fx"
     base, clean = kid_run(emu, fwsc, out, name + "-baseline", 6000,
