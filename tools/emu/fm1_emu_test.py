@@ -504,7 +504,7 @@ def kid_checks(emu, fwsc, out, profile="full"):
         section = slice(3500 * RATE // 1000 * 4, 4300 * RATE // 1000 * 4)
         distinct = raw[section] != plain[section]
     except (FileNotFoundError, OSError):
-        dx_peak = ("DRUM-X plays", False, "missing audio capture")
+        dx_peak = (False, "missing audio capture")
         distinct = False
     results[name] = [("emulator completed", check[0][1], "Kids UI DRUM-X preview"),
                      ("sidecar synthesizer audible", *dx_peak),
