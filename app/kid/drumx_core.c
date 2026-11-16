@@ -84,7 +84,11 @@ void fm1_kdx_note(unsigned lane, unsigned velocity)
     if (next == read_at) return; /* bounded, no audio-IRQ allocation */
     pending[write_at].lane = (uint8_t)lane;
     pending[write_at].velocity = (uint8_t)velocity;
-    __atomic_store_n(&write_at, (uint8_t)next, __ATOMIC_RELEASE);
+    /* The FM1 compiler does not provide __atomic 1-byte helpers. Both
+     * cursors are naturally atomic on this single-core device; a compiler
+     * barrier publishes the slot before its write cursor. */
+    __asm__ volatile("" ::: "memory");
+    write_at = (uint8_t)next;
 }
 static void start_hit(unsigned lane, unsigned velocity)
 {
@@ -104,7 +108,8 @@ static void start_hit(unsigned lane, unsigned velocity)
 FM1_AUDIO_CODE void fm1_kdx_mix(int32_t *stereo, unsigned frames)
 {
     if (!stereo || !enabled) return;
-    uint8_t stop = __atomic_load_n(&write_at, __ATOMIC_ACQUIRE);
+    uint8_t stop = write_at;
+    __asm__ volatile("" ::: "memory");
     while (read_at != stop) {
         unsigned i = read_at;
         if (pending[i].velocity) start_hit(pending[i].lane, pending[i].velocity);
