@@ -1461,6 +1461,7 @@ static unsigned current_song(void)
 }
 static int load_song(unsigned song)
 {
+    drumx_stop();
     release_keys();
     if (playing) { if (recording) groove_edit_record(0, track, 0); (void)post(0xfc, 0, 0, 1); }
     unsigned slot = groove_project_slot();
@@ -1915,7 +1916,7 @@ void groove_screen_control(void)
         say(view.muted ? "QUIET" : "ON", view.muted ? SOFT : GO, now);
     }
     if (mode != old_mode) release_keys();
-    if (drumx_live && track != drumx_track) drumx_stop();
+    if (drumx_live && (track != drumx_track || !drum_track(track))) drumx_stop();
 
     /* BEAT: white keys toggle steps; black keys pick what to place, and sound it. */
     uint32_t live = fx_started ? 0 : c.keys;
