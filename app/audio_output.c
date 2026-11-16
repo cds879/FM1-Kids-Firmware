@@ -20,6 +20,8 @@ static inline __attribute__((always_inline)) int32_t limit(int64_t value)
 FM1_AUDIO_CODE void fm1_output_mix(int32_t *output)
 {
     if (!output) return;
+    /* Mix the optional DRUM-X kit BEFORE output gain and USB/Bluetooth. */
+    fm1_kdx_mix(output, FM1_BLOCK_FRAMES);
     unsigned target = fm1_engine_output_level();
     if (target > 127U) target = 127U;
     int delta = (int)target - (int)output_gain;
@@ -45,7 +47,5 @@ FM1_AUDIO_CODE void fm1_output_mix(int32_t *output)
             output[i] = value > 8388607 ? 8388607 : value < -8388608 ? -8388608 : value;
         }
     }
-    /* Experimental additional DRUM-X audio voice path (off until explicitly enabled). */
-    fm1_kdx_mix(output, FM1_BLOCK_FRAMES);
     (void)fm1_usb_audio_write(output, FM1_BLOCK_FRAMES);
 }
