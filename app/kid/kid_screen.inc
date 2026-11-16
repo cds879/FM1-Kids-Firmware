@@ -189,23 +189,33 @@ static unsigned part, song_parts = 1;
 /* Animations. Each instrument moves its picture its own way when it plays
  * (a drum jumps, a bass rumbles, a bell swings, ...) and sends its own kind
  * of sparks out of it (notes, stars, puffs of air, rings, pixels, bangs). */
-enum { SPARKS = 10, SPARK_MS = 700, MOVE_MS = 360 };
-enum { M_HOP, M_RUMBLE, M_SWING, M_STRUM, M_PUFF, M_STEP, M_BLINK,
-       M_WAND, M_UFO, M_IMPACT };
+enum { SPARKS = 10, SPARK_MS = 950, MOVE_MS = 480 };
+/* Every instrument has its own motion and an extra tile accent.
+ * Small integer-only drawing effects: no new sprites, audio, or assets. */
+enum { M_KEYS, M_PIPES, M_HORN, M_WIND, M_BOW, M_VOICES, M_BELL,
+       M_MALLET, M_STRUM, M_BASS, M_ROBOT, M_DREAM, M_GAME, M_CONFETTI,
+       M_DRUM, M_WAND, M_UFO, M_IMPACT };
 enum { P_NOTE, P_STAR, P_PIXEL, P_PUFF, P_RING, P_BANG,
        P_GLITTER, P_BEAM, P_ZAP };
 static const struct { uint8_t move, spark; } kind_anim[I_COUNT] = {
-    {M_HOP, P_NOTE},   /* PIANO: hops, notes */           {M_PUFF, P_NOTE},    /* ORGAN: breathes, notes */
-    {M_PUFF, P_PUFF},  /* TRUMPET: blows, puffs */        {M_PUFF, P_PUFF},    /* FLUTE */
-    {M_SWING, P_NOTE}, /* VIOLIN: sways */                {M_SWING, P_NOTE},   /* CHOIR: sings and sways */
-    {M_SWING, P_RING}, /* BELLS: swing, rings */          {M_HOP, P_STAR},     /* XYLOPHONE: tink! stars */
-    {M_STRUM, P_NOTE}, /* GUITAR: strums */               {M_RUMBLE, P_RING},  /* BASS: rumbles, waves */
-    {M_BLINK, P_PIXEL},/* ROBOT: blinks, bits */          {M_SWING, P_STAR},   /* DREAM: floats, twinkles */
-    {M_STEP, P_PIXEL}, /* GAME: jumps in steps, pixels */ {M_HOP, P_STAR},     /* FUN */
-    {M_HOP, P_BANG},   /* DRUMS: jump, bang! */
-    {M_WAND, P_GLITTER}, /* MAGIC: wand flick and drifting sparkles */
-    {M_UFO, P_BEAM},    /* SPACE: hovering saucer and sweeping light */
-    {M_IMPACT, P_ZAP}}; /* SFX: jolting burst and electric sparks */
+    {M_KEYS, P_NOTE},       /* PIANO: jumping keys */
+    {M_PIPES, P_PUFF},     /* ORGAN: pulsing pipes */
+    {M_HORN, P_PUFF},      /* TRUMPET: brassy blast */
+    {M_WIND, P_PUFF},      /* FLUTE: wind stream */
+    {M_BOW, P_NOTE},       /* VIOLIN: bow strokes */
+    {M_VOICES, P_RING},    /* CHOIR: layered harmonies */
+    {M_BELL, P_RING},      /* BELLS: pendulum swing */
+    {M_MALLET, P_STAR},    /* XYLOPHONE: striking mallet */
+    {M_STRUM, P_NOTE},     /* GUITAR: string strum */
+    {M_BASS, P_RING},      /* BASS: deep tremor */
+    {M_ROBOT, P_PIXEL},    /* ROBOT: glitch flicker */
+    {M_DREAM, P_STAR},     /* DREAM: slow floating */
+    {M_GAME, P_PIXEL},     /* GAME: 8-bit jump */
+    {M_CONFETTI, P_STAR}, /* FUN: tumbling confetti */
+    {M_DRUM, P_BANG},      /* DRUMS: double strike */
+    {M_WAND, P_GLITTER},   /* MAGIC: wand flourish */
+    {M_UFO, P_BEAM},       /* SPACE: hover and scan */
+    {M_IMPACT, P_ZAP}};    /* SFX: electric impact */
 static struct { uint8_t note, track, kind; uint32_t at; } sparks[SPARKS];
 static unsigned spark_next;
 static uint32_t hit_at[GROOVE_TRACKS];  /* when each instrument last started a note */
@@ -913,20 +923,28 @@ static void tile_move(unsigned t, unsigned look_i, int *dx, int *dy, unsigned *l
 {
     uint32_t age = clock_now - hit_at[t];
     if (!hit_at[t] || age >= MOVE_MS) return;
-    int left = (int)(MOVE_MS - age);                 /* fades from MOVE_MS to 0 */
-    unsigned phase = age / 45U;
-    *lit = age < 90U;                                /* a flash as it starts */
+    int left = (int)(MOVE_MS - age);
+    unsigned phase = age / 50U;
+    *lit = age < 100U;
     switch (kind_anim[look_i].move) {
-    case M_HOP:    *dy = -left * 6 / MOVE_MS; break;                         /* jump and land */
-    case M_RUMBLE: *dx = phase & 1U ? 2 : -2; *dy = phase & 2U ? 1 : 0; break;  /* shake */
-    case M_SWING:  *dx = (phase % 4U == 0 ? 0 : phase % 4U == 1 ? 3 : phase % 4U == 2 ? 0 : -3) * left / MOVE_MS; break;
-    case M_STRUM:  *dy = phase & 1U ? 2 : -1; break;                          /* strings wobble */
-    case M_PUFF:   *dx = age < 120U ? -3 : 0; break;                          /* breathe in, blow */
-    case M_STEP:   *dy = age < 120U ? -6 : age < 240U ? -3 : 0; break;        /* 8-bit jump */
-    case M_BLINK:  *lit = (phase & 1U) == 0; break;
-    case M_WAND:   *dx = phase & 1U ? 2 : -2; *dy = -left * 3 / MOVE_MS; break;
-    case M_UFO:    *dy = (phase / 2U) & 1U ? -3 : 1; *lit = (phase & 3U) < 2U; break;
-    case M_IMPACT: *dx = phase & 1U ? -3 : 3; *dy = left * 2 / MOVE_MS; *lit = (phase & 1U) == 0; break;                           /* lights flash */
+    case M_KEYS:     *dy = phase & 1U ? -left * 5 / MOVE_MS : 2; break;
+    case M_PIPES:    *dy = phase % 3U == 0 ? -3 : 1; *lit = (phase & 1U) == 0; break;
+    case M_HORN:     *dx = age < 130U ? -5 : age < 270U ? 2 : 0; break;
+    case M_WIND:     *dx = (int)(phase % 4U) - 2; *dy = -left * 2 / MOVE_MS; break;
+    case M_BOW:      *dx = phase & 1U ? 3 : -3; *dy = phase & 2U ? -2 : 1; break;
+    case M_VOICES:   *dy = phase % 4U < 2U ? -2 : 2; *lit = (phase % 3U) != 0; break;
+    case M_BELL:     *dx = phase % 4U == 0 ? 0 : phase % 4U == 1 ? 4 : phase % 4U == 2 ? 0 : -4; break;
+    case M_MALLET:   *dy = age < 100U ? -6 : age < 240U ? 3 : 0; break;
+    case M_STRUM:    *dx = phase & 1U ? 3 : -3; *dy = age < 170U ? 2 : -1; break;
+    case M_BASS:     *dx = phase & 1U ? 2 : -2; *dy = phase & 2U ? 3 : 0; break;
+    case M_ROBOT:    *dx = phase % 3U == 0 ? -3 : phase % 3U == 1 ? 3 : 0; *lit = (phase & 1U) == 0; break;
+    case M_DREAM:    *dy = phase < 5U ? -(int)phase : (int)phase - 9; *dx = phase & 2U ? 1 : -1; break;
+    case M_GAME:     *dy = age < 140U ? -8 : age < 300U ? -4 : 0; *dx = phase & 1U ? 2 : 0; break;
+    case M_CONFETTI: *dx = phase & 1U ? -2 : 2; *dy = phase % 3U == 0 ? -4 : 1; break;
+    case M_DRUM:     *dy = age < 110U || (age > 200U && age < 320U) ? -6 : 2; break;
+    case M_WAND:     *dx = phase & 1U ? 3 : -3; *dy = -left * 4 / MOVE_MS; break;
+    case M_UFO:      *dy = (phase / 2U) & 1U ? -4 : 1; *dx = phase % 4U == 0 ? -2 : 1; *lit = (phase & 3U) < 2U; break;
+    case M_IMPACT:   *dx = phase & 1U ? -4 : 4; *dy = left * 2 / MOVE_MS; *lit = (phase & 1U) == 0; break;
     }
 }
 /* One spark, by kind; age runs 0..SPARK_MS. ink stands out on the tile; tint
@@ -1022,6 +1040,76 @@ static void draw_spark(unsigned kind_s, unsigned note, uint32_t age, int x, int 
     }
     }
 }
+/* A distinctive second layer on each instrument: notes do more than
+ * nudge a sprite. Kept inside each tile with cfill clipping and integer math. */
+static void draw_instrument_action(unsigned kind_i, unsigned note, uint32_t age,
+                                   int x, int y, uint16_t ink)
+{
+    if (age >= SPARK_MS) return;
+    int p = (int)(age / 70U), n = (int)(note % 7U);
+    int cx = x + 28, cy = y + 23;
+    switch (kind_i) {
+    case I_PIANO: /* keys cascade */
+        for (int k = 0; k < 4; ++k) cfill(x + 7 + k * 12, y + 44 - (p + k) % 5 * 4, 8, 4, ink);
+        break;
+    case I_ORGAN: /* rising and falling organ pipes */
+        for (int k = 0; k < 3; ++k) cfill(x + 10 + k * 16, y + 48 - (8 + (p + k * 2) % 8), 5, 8 + (p + k * 2) % 8, ink);
+        break;
+    case I_TRUMPET: /* widening brass blast */
+        for (int k = 0; k < 3; ++k) cfill(x + 30 + k * 8, cy + k * 5 - p, 6, 3 + k * 3, ink);
+        break;
+    case I_FLUTE: /* breath bubbles climb */
+        for (int k = 0; k < 4; ++k) cfill(cx + (k & 1 ? 7 : -7) + p / 2, y + 45 - (p * 3 + k * 8) % 40, 3 + k, 3 + k, ink);
+        break;
+    case I_VIOLIN: /* bow stroke and floating strings */
+        cfill(x + 12 + p % 12, y + 17, 3, 29, ink);
+        cfill(x + 38 - p % 12, y + 25, 2, 18, ink);
+        break;
+    case I_CHOIR: /* staggered voice waves */
+        for (int k = 0; k < 3; ++k) cfill(x + 8 + k * 18, y + 44 - (p + k) % 9 * 2, 5, 7 + (p + k) % 9 * 2, ink);
+        break;
+    case I_BELLS: /* swinging clapper and ringing marks */
+        cfill(cx + (p % 6 - 3) * 3, y + 39, 5, 8, ink);
+        cfill(x + 7 + p * 2 % 20, y + 11, 3, 9, ink);
+        break;
+    case I_XYLO: /* alternating mallet strikes */
+        for (int k = 0; k < 2; ++k) cfill(x + 12 + k * 28, y + 14 + (p + k) % 4 * 7, 6, 9, ink);
+        break;
+    case I_GUITAR: /* vibrating parallel strings */
+        for (int k = 0; k < 4; ++k) cfill(x + 10 + k * 9, y + 36 + ((p + k) & 1 ? -4 : 4), 6, 2, ink);
+        break;
+    case I_BASS: /* heavy moving sound waves */
+        for (int k = 0; k < 3; ++k) cfill(x + 5 + k * 18, y + 37 - (p + k) % 3 * 7, 11, 4, ink);
+        break;
+    case I_ROBOT: /* scanning eyes and glitches */
+        cfill(x + 11 + (p * 4) % 32, y + 14, 12, 3, ink);
+        for (int k = 0; k < 3; ++k) cfill(x + (n + k * 13 + p * 3) % 52, y + 35 + (k & 1) * 8, 5, 3, ink);
+        break;
+    case I_DREAM: /* drifting mini moon and stars */
+        cfill(x + 7 + p * 3 % 33, y + 12 + (p & 1 ? 4 : 0), 9, 9, ink);
+        for (int k = 0; k < 3; ++k) cfill(x + 7 + k * 16, y + 42 - (p + k * 3) % 12, 3, 3, ink);
+        break;
+    case I_GAME: /* pixel jumps and trailing coins */
+        for (int k = 0; k < 4; ++k) cfill(x + 4 + k * 13, y + 46 - (p + k) % 4 * 8, 6, 6, ink);
+        break;
+    case I_FUN: /* rain of confetti */
+        for (int k = 0; k < 6; ++k) cfill(x + 5 + (n + k * 9 + p * 2) % 48, y + 9 + (p * 4 + k * 7) % 42, 4, 4, ink);
+        break;
+    case I_DRUMS: /* bouncing drumsticks */
+        cfill(x + 10 + (p & 1 ? 4 : 0), y + 8 + (p % 3) * 6, 5, 22, ink);
+        cfill(x + 39 - (p & 1 ? 4 : 0), y + 8 + ((p + 1) % 3) * 6, 5, 22, ink);
+        break;
+    case I_MAGIC: /* orbiting spell particles */
+        for (int k = 0; k < 4; ++k) cfill(cx + ((p * 2 + k * 8) % 28) - 14, cy + ((p + k * 5) % 22) - 11, 4, 4, ink);
+        break;
+    case I_SPACE: /* UFO scan lights */
+        for (int k = 0; k < 3; ++k) cfill(x + 17 + k * 11 + (p & 1 ? 2 : -2), y + 33 + k * 5, 5 + k * 2, 3, ink);
+        break;
+    case I_SFX: /* expanding impact fragments */
+        for (int k = 0; k < 4; ++k) cfill(cx + (k & 1 ? 1 : -1) * (9 + p * 2), cy + (k & 2 ? 1 : -1) * (8 + p), 5, 5, ink);
+        break;
+    }
+}
 static void draw_tile(unsigned i, unsigned x, unsigned y, unsigned w, unsigned h)
 {
     struct groove_view v;
@@ -1043,6 +1131,7 @@ static void draw_tile(unsigned i, unsigned x, unsigned y, unsigned w, unsigned h
         uint32_t age = clock_now - sparks[k].at;
         if (!sparks[k].at || sparks[k].track != i || age >= SPARK_MS) continue;
         draw_spark(kind_anim[look_i].spark, sparks[k].note, age, (int)x, (int)y, w, h, selected ? INK : c);
+        draw_instrument_action(look_i, sparks[k].note, age, (int)x, (int)y, selected ? INK : c);
     }
     for (unsigned k = 0; k < 27; ++k)
         if (key_note[k] != 0xff && key_track[k] == i) { fill(x + w - 12, y + 6, 7, 7, INK); break; }

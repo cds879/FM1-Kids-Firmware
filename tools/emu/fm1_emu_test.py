@@ -268,7 +268,7 @@ def kid_run(emu, fwsc, out, name, ms, keys, flash=None):
     # 100 ms screenshots where tests actually inspect frame transitions.
     # Audio-only scenarios retain a 1-second cadence (10x fewer PPM frames).
     visual = (name in ("songs", "sparks", "sparks-song", "learn", "help", "picker", "battery")
-              or name.startswith(("instruments-", "bass-", "playful-sounds-", "sparks-")))
+              or name.startswith(("instruments-", "bass-", "playful-sounds-", "sparks-", "instrument-actions-")))
     r = run(emu, fwsc, ms, keys, out / name, flash=flash, frames=100 if visual else 1000)
     if r["lcd"]:
         write_png(out / f"{name}.png", r["lcd"])
@@ -372,12 +372,35 @@ def kid_checks(emu, fwsc, out, profile="full"):
         frames = []
     c += [("the song makes the pictures move", len(set(frames)) >= 4, f"{len(set(frames))} different frames in 1.6 s")]
     results[name] = c
+    # Check distinct animated behaviors in the lean PR suite too, not only
+    # in the full-gallery job on main.
+    name = "instrument-actions"
+    scenes = {}
+    for label, turns in (("organ", "2000:e1:1,"), ("violin", "2000:e1:4,"),
+                         ("robot", "2000:e1:10,"), ("drums", "2000:e1:14,"),
+                         ("magic", "2000:e1:15,"), ("space", "2000:e1:16,")):
+        r, checks = kid_run(emu, fwsc, out, f"{name}-{label}", 3900,
+                            turns + "3000:C4@100,3650:C4^")
+        try:
+            f1 = frame_lcd(out / f"{name}-{label}", 3100)[2]
+            f2 = frame_lcd(out / f"{name}-{label}", 3400)[2]
+            scenes[label] = (checks[0][1], f1, f2)
+        except (FileNotFoundError, IndexError):
+            scenes[label] = (False, None, None)
+    c = [("emulator ran cleanly", all(v[0] for v in scenes.values()), "6 instruments"),
+         ("each action animates", all(v[1] is not None and v[1] != v[2] for v in scenes.values()),
+          "distinct frames at 3.1 and 3.4 seconds"),
+         ("different instrument actions look different",
+          len({v[2] for v in scenes.values()}) == len(scenes),
+          "six different frames from organ, violin, robot, drums, magic and space")]
+    results[name] = c
     if profile == "full":
         # Gallery: each kind of animation, frame by frame (sparks-gallery.png; also
         # printed to the log as base64 so it can be looked at without the artifact).
         rows = []
-        for label, turns in (("piano", ""), ("trumpet", "2000:e1:2,"), ("bells", "2000:e1:6,"), ("bass", "2000:e1:9,"),
-                             ("robot", "2000:e1:10,"), ("dream", "2000:e1:11,"), ("game", "2000:e1:12,"), ("drums", "2000:e1:14,")):
+        for i, label in enumerate(("piano", "organ", "trumpet", "flute", "violin", "choir", "bells", "xylophone",
+                                   "guitar", "bass", "robot", "dream", "game", "fun", "drums", "magic", "space", "sfx")):
+            turns = f"2000:e1:{i}," if i else ""
             kid_run(emu, fwsc, out, f"{name}-{label}", 3800, turns + "3000:C4@110,3300:C4^")
             row = []
             for ms in (2900, 3000, 3100, 3200, 3300, 3400, 3600):
