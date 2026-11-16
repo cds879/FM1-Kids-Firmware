@@ -14,7 +14,10 @@ static int16_t bluetooth_pcm[FM1_BLOCK_WORDS] __attribute__((aligned(32)));
 void fm1_output_reset(void) {
     output_gain = 0;
 #if FM1_KID_UI
-    fm1_kdx_reset();
+    /* Output resets also occur during a brief DMA suspend. Do not erase
+     * an active drum kit each time the output restarts. */
+    static unsigned kdx_initialized;
+    if (!kdx_initialized) { fm1_kdx_reset(); kdx_initialized = 1; }
 #endif
 }
 static inline __attribute__((always_inline)) int32_t limit(int64_t value)
