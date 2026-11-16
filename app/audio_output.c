@@ -2,12 +2,13 @@
 #include "audio_output.h"
 #include "fm1_engine_control.h"
 #include "fm1_audio_io.h"
+#include "kid/drumx_core.h"
 
 static unsigned output_gain;
 static int32_t usb_pcm[FM1_BLOCK_WORDS] __attribute__((aligned(32)));
 static int16_t bluetooth_pcm[FM1_BLOCK_WORDS] __attribute__((aligned(32)));
 
-void fm1_output_reset(void) { output_gain = 0; }
+void fm1_output_reset(void) { output_gain = 0; fm1_kdx_reset(); }
 static inline __attribute__((always_inline)) int32_t limit(int64_t value)
 {
     /* Bias signed 24-bit PCM into [0, 2^24). Unsigned arithmetic also
@@ -44,5 +45,7 @@ FM1_AUDIO_CODE void fm1_output_mix(int32_t *output)
             output[i] = value > 8388607 ? 8388607 : value < -8388608 ? -8388608 : value;
         }
     }
+    /* Experimental additional DRUM-X audio voice path (off until explicitly enabled). */
+    fm1_kdx_mix(output, FM1_BLOCK_FRAMES);
     (void)fm1_usb_audio_write(output, FM1_BLOCK_FRAMES);
 }
