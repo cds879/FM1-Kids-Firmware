@@ -158,7 +158,9 @@ FM1_AUDIO_CODE void fm1_kdx_mix(int32_t *stereo, unsigned frames)
             int32_t blend_sample = (wave * (int32_t)(127U - mix) + filtered * (int32_t)mix) / 127;
             int32_t out = (int32_t)(((int64_t)blend_sample * (int32_t)(env >> 8)) >> 10);
             out = (int32_t)(((int64_t)out * v->velocity * controls[KDX_GAIN]) >> 16);
-            out >>= 2; /* leave headroom for eight concurrent hits and native audio */
+            /* Keep the native Q23 output gain. Previous /4 attenuation made
+             * a solo kick inaudible in the device emulator; the summing
+             * stage below still saturates safely on simultaneous hits. */
             for (unsigned ch = 0; ch < 2; ++ch) {
                 int64_t sum = (int64_t)stereo[j * 2U + ch] + out;
                 stereo[j * 2U + ch] = sum > 8388607 ? 8388607 : sum < -8388608 ? -8388608 : (int32_t)sum;
