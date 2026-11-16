@@ -263,6 +263,12 @@ static unsigned learn, learn_pos, learn_key = 0xff, learn_scale, learn_chords;  
 static uint32_t learn_done_at;
 static int learn_octave;
 static unsigned sound_panel;
+/* Drum Fun and momentary live FX use existing 808/synth parameters, not samples. */
+static unsigned drum_style, fx_key = 255, fx_touched;
+static uint32_t fx_started, fx_pulse_at;
+static int fx_volume_before, fx_bright_before, fx_tempo_before, fx_silly_before;
+static unsigned fx_bright_param, fx_bright_part, fx_bright_raw, fx_bright_fm, fx_bright_valid;
+static uint8_t fx_sends_before[2];
 static unsigned help, home_page;      /* hold HOME: the help page shown, the page HOME was pressed on */
 static uint32_t home_down_at;          /* EDIT: REVERB, ECHO, LONG and ROOM on K1..K4 */
 static int8_t knob_dir[7];            /* knob acceleration: turning fast takes bigger steps */
@@ -558,6 +564,135 @@ static void bright_edit(int delta)
     if (b.fm) groove_fm_edit(track, b.param, delta);
     else groove_tone_edit(track, b.part, b.param, delta);
 }
+/* 808 factory synthesis controls, addressed by descriptor name so each
+ * pad's different parameter layout is respected. */
+static int drum_param(unsigned pad, const char *name)
+{
+    unsigned n = groove_tone_count(track, pad);
+    for (unsigned i = 0; i < n; ++i) {
+        const fm1_param_t *p = groove_tone_parameter(track, pad, i);
+        if (p && !strcmp(p->name, name)) return (int)i;
+    }
+    return -1;
+}
+static int drum_value(unsigned pad, const char *name)
+{
+    int p = drum_param(pad, name);
+    uint8_t values[GROOVE_TONE_PARAMS];
+    if (p < 0 || groove_tone_copy(track, pad, values) <= p) return -1;
+    return values[p];
+}
+static void drum_set(unsigned pad, const char *name, int value)
+{
+    int p = drum_param(pad, name);
+    if (p < 0) return;
+    const fm1_param_t *desc = groove_tone_parameter(track, pad, (unsigned)p);
+    int old = drum_value(pad, name);
+    if (old >= 0 && desc)
+        groove_tone_edit(track, pad, (unsigned)p, clampi(value, 0, desc->max) - old);
+}
+static const char *const drum_style_names[4] = {"ROCK", "HIP-HOP", "ELECTRO", "SILLY"};
+static void drum_preset(unsigned style)
+{
+    /* Distinct synthesized 808 kits, editing the built-in kick, snare, hats
+     * and percussion patches: no PCM data, and patches save with the song. */
+    static const uint8_t tuning[4][4] = {{66, 63, 61, 65}, {48, 54, 58, 54},
+                                          {76, 81, 72, 79}, {96, 36, 102, 27}};
+    static const uint8_t tails[4][4] = {{77, 104, 49, 66}, {115, 91, 37, 71},
+                                         {66, 63, 25, 47}, {116, 117, 112, 99}};
+    static const uint8_t drive[4] = {12, 35, 52, 100};
+    const uint8_t pads[4] = {0, 1, 10, 6}; /* kick, snare, closed hat, clap */
+    for (unsigned i = 0; i < 4; ++i) {
+        drum_set(pads[i], "Tune", tuning[style][i]);
+        drum_set(pads[i], "Decay", tails[style][i]);
+        drum_set(pads[i], "Drive", drive[style]);
+    }
+    drum_set(0, "Tone", style == 1 ? 22 : style == 3 ? 115 : 65);
+    drum_set(1, "Snappy", style == 1 ? 90 : style == 3 ? 120 : 65);
+    drum_set(11, "Accent", style == 3 ? 115 : 105);
+    drum_style = style;
+}
+/* FX are reversible while held. The current patch and tempo are restored
+ * when FX or its key is released; they do not write an FX automation lane. */
+static void fx_restore(void)
+{
+    if (fx_key == 255) return;
+    struct groove_view v;
+    groove_get_view(track, 0, &v);
+    groove_control_edit(track, 0, fx_volume_before - (int)v.volume, 0);
+    if (fx_bright_valid) {
+        if (fx_bright_fm) {
+            uint8_t patch[156];
+            if (!groove_fm_copy(track, patch, NULL))
+                groove_fm_edit(track, fx_bright_param, (int)fx_bright_raw - (int)patch[fx_bright_param]);
+        } else {
+            uint8_t patch[GROOVE_TONE_PARAMS];
+            if (groove_tone_copy(track, fx_bright_part, patch) > (int)fx_bright_param)
+                groove_tone_edit(track, fx_bright_part, fx_bright_param,
+                                 (int)fx_bright_raw - (int)patch[fx_bright_param]);
+        }
+    }
+    uint8_t sends[2];
+    groove_sends_get(track, sends);
+    for (unsigned i = 0; i < 2; ++i)
+        groove_sends_edit(track, i, (int)fx_sends_before[i] - sends[i]);
+    groove_tempo_edit(fx_tempo_before - (int)groove_tempo_saved());
+    silly = (unsigned)fx_silly_before;
+    fx_key = 255;
+    /* Straighten any pitch-bend on the next control tick. */
+}
+static void fx_start(unsigned k, uint32_t now)
+{
+    if (fx_key == k) return;
+    fx_restore();
+    struct groove_view v;
+    groove_get_view(track, 0, &v);
+    fx_volume_before = v.volume;
+    fx_bright_before = bright_value(track);
+    struct bright b;
+    fx_bright_valid = bright_target(track, &b);
+    if (fx_bright_valid) {
+        fx_bright_part = b.part; fx_bright_param = b.param; fx_bright_fm = b.fm;
+        uint8_t patch[GROOVE_TONE_PARAMS];
+        uint8_t fm_patch[156];
+        if (b.fm && !groove_fm_copy(track, fm_patch, NULL)) fx_bright_raw = fm_patch[b.param];
+        else if (!b.fm && groove_tone_copy(track, b.part, patch) > (int)b.param)
+            fx_bright_raw = patch[b.param];
+        else fx_bright_valid = 0;
+    }
+    fx_tempo_before = groove_tempo_saved();
+    fx_silly_before = (int)silly;
+    groove_sends_get(track, fx_sends_before);
+    fx_key = k;
+    fx_pulse_at = now;
+    if (k == 0) { silly = SILLY_WOBBLE; bend_at = now; } /* pitch wobble over sequenced notes */
+    if (k == 1 && fx_bright_valid) bright_edit(-(int)(fx_bright_raw / 2U));
+    if (k == 2) groove_sends_edit(track, 1, 15 - fx_sends_before[1]);
+    if (k == 4) groove_tempo_edit(-(int)(fx_tempo_before / 2U));
+}
+static void fx_tick(uint32_t now)
+{
+    if (fx_key != 3 && fx_key != 5) return;
+    if (now - fx_pulse_at < (fx_key == 3 ? 110U : 175U)) return;
+    fx_pulse_at = now;
+    struct groove_view v;
+    groove_get_view(track, 0, &v);
+    unsigned low = (now / (fx_key == 3 ? 110U : 175U)) & 1U;
+    int target = low ? fx_volume_before / (fx_key == 3 ? 10 : 3) : fx_volume_before;
+    groove_control_edit(track, 0, target - (int)v.volume, 0);
+}
+static void record_knob_lock(unsigned value, unsigned parameter)
+{
+    if (!recording || !playing || groove_lock_parameter_count(track) <= parameter) return;
+    unsigned step = groove_sequence_record_position(track);
+    if (step >= 64) return;
+    int old = (int)groove_step_setting(track, step, 5);
+    if (old != (int)parameter + 1)
+        (void)groove_step_setting_edit(track, step, 5, (int)parameter + 1 - old);
+    old = (int)groove_step_setting(track, step, 6);
+    if (old != (int)value)
+        (void)groove_step_setting_edit(track, step, 6, (int)value - old);
+}
 /* LONG: how long notes ring after the key is let go. DX7: every operator's
  * release rate; other engines: their release/decay/length setting. */
 enum { LONG_SLOWEST = 30 };   /* DX7 release rate: about a few seconds at most */
@@ -723,6 +858,13 @@ static uint32_t signature(unsigned e)
         if (parent) return 0x40000000U | ble.state | ble.role << 4 | ble.count << 6 | ble_pick << 10 |
                            (uint32_t)(ble_result & 7) << 14 | (uint32_t)ble.error << 17;
         if (confirm_until) return 0x20000000U | track;
+        if (fx_started) return 0x31000000U | fx_key | (clock_now / 130U & 15U) << 8;
+        if (sound_panel == 3 && drum_track(track)) {
+            uint32_t v = 0x33000000U | drum_style << 4 | drum << 8;
+            for (unsigned i = 0; i < 4; ++i) v = mix(v, (unsigned)(drum_value(i == 0 ? 11 : drum,
+                                      i == 0 ? "Accent" : i == 1 ? "Tune" : i == 2 ? "Decay" : "Drive") + 1));
+            return v;
+        }
         if (arp_panel)
             return 0x10000000U | track | groove_arp_enabled(track) << 3 | groove_arp_setting(track, 0) << 4 |
                    groove_arp_setting(track, 1) << 6 | groove_arp_setting(track, 2) << 8 |
@@ -754,6 +896,12 @@ static uint32_t signature(unsigned e)
                      groove_arp_setting(i, 5) << 9 | shown_kind(i) << 10;
         s = mix(s, v.audible ? v.level / 8U + 1U : 0);
         if (hit_at[i] && clock_now - hit_at[i] < MOVE_MS) s = mix(s, (clock_now - hit_at[i]) / 30U + 1U);
+        if (i == track && fx_started) s = mix(s, 0x60000U | fx_key << 8 | (clock_now / 85U & 7U));
+        if (i == track && drum_track(i) && sound_panel == 3)
+            s = mix(s, (unsigned)(drum_value(drum, "Tune") + 1) | 
+                       (unsigned)(drum_value(11, "Accent") + 1) << 8 |
+                       (unsigned)(drum_value(drum, "Drive") + 1) << 16);
+
         for (unsigned k = 0; k < SPARKS; ++k)
             if (sparks[k].at && sparks[k].track == i && clock_now - sparks[k].at < SPARK_MS)
                 s = mix(mix(s, sparks[k].note), (clock_now - sparks[k].at) / 25U + 1U);
@@ -872,6 +1020,27 @@ static void draw_keys(void)
     text_center(160, 80, 205, "SILLY", 1, SOFT);
     text_center(160, 80, 217, silly_names[silly], 2, silly ? kid_colors[5] : OFF4);
 }
+static void draw_drum_fun(void)
+{
+    static const char *const labels[4] = {"PUNCH", "PITCH", "LENGTH", "WEIRD"};
+    int v[4] = {drum_value(11, "Accent"), drum_value(drum, "Tune"),
+                drum_value(drum, "Decay"), drum_value(drum, "Drive")};
+    text(4, 192, "DRUM FUN", 2, kid_colors[1]);
+    text(132, 193, drum_style_names[drum_style], 1, GO);
+    for (unsigned k = 0; k < 4; ++k) {
+        unsigned x = k * 60U, amount = v[k] < 0 ? 0U : (unsigned)v[k];
+        text_center(x, 60, 212, labels[k], 1, SOFT);
+        fill(x + 8, 226, 44, 7, OFF);
+        fill(x + 8, 226, amount * 44U / 127U, 7, kid_colors[k * 2U % 8U]);
+    }
+}
+static void draw_live_fx(void)
+{
+    static const char *const names[6] = {"WOBBLE", "ROBOT", "ECHO", "STUTTER", "SLOW", "GLITCH"};
+    text(5, 193, "SILLY FX - HOLD A KEY", 2, kid_colors[5]);
+    text(4, 216, "F3 G3 A3 B3 C4 D4", 1, SOFT);
+    if (fx_key < 6) text(136, 217, names[fx_key], 2, GO);
+}
 static void draw_foot(void)
 {
     fill(0, 190, 240, 50, BG);
@@ -881,6 +1050,8 @@ static void draw_foot(void)
         text_center(0, 240, 224, "FX = YES   LFO = UNDO LATER", 1, SOFT);
         return;
     }
+    if (fx_started) { draw_live_fx(); return; }
+    if (sound_panel == 3 && drum_track(track)) { draw_drum_fun(); return; }
     if (arp_panel) { draw_arp(); return; }
     if (notice) { text_center(0, 240, 204, notice, 3, notice_color); return; }
     if (songs_panel) { draw_songs(); return; }
@@ -1132,6 +1303,27 @@ static void draw_tile(unsigned i, unsigned x, unsigned y, unsigned w, unsigned h
         if (!sparks[k].at || sparks[k].track != i || age >= SPARK_MS) continue;
         draw_spark(kind_anim[look_i].spark, sparks[k].note, age, (int)x, (int)y, w, h, selected ? INK : c);
         draw_instrument_action(look_i, sparks[k].note, age, (int)x, (int)y, selected ? INK : c);
+    }
+    /* The drum's character and live FX visibly follow the physical knobs,
+     * rather than animating only on note triggers. */
+    if (i == track && drum_track(i) && sound_panel == 3) {
+        int punch = drum_value(11, "Accent");
+        int pitch = drum_value(drum, "Tune");
+        int drive = drum_value(drum, "Drive");
+        int height = pitch < 0 ? 4 : 4 + pitch * 14 / 127;
+        unsigned pulse = (clock_now / 90U) & 3U;
+        cfill((int)x + 8, (int)y + 12 + (int)pulse, 3 + (punch < 0 ? 0 : punch * 18 / 127), 3, INK);
+        cfill((int)x + 8, (int)y + 36 - height, 4, height, kid_colors[2]);
+        if (drive > 50) {
+            cfill((int)x + 38 + (int)pulse * 2, (int)y + 22, 5, 5, kid_colors[1]);
+            cfill((int)x + 40 - (int)pulse * 2, (int)y + 34, 4, 4, INK);
+        }
+    }
+    if (i == track && fx_started && fx_key < 6) {
+        int p = (int)(clock_now / 85U % 5U);
+        cfill((int)x + 9 + p * 6, (int)y + 9, 9, 3, kid_colors[5]);
+        if (fx_key == 2) cfill((int)x + 22, (int)y + 35 - p * 3, 15 + p * 2, 3, INK);
+        else if (fx_key == 3 || fx_key == 5) cfill((int)x + 12, (int)y + 36, (p & 1) ? 34 : 15, 4, INK);
     }
     for (unsigned k = 0; k < 27; ++k)
         if (key_note[k] != 0xff && key_track[k] == i) { fill(x + w - 12, y + 6, 7, 7, INK); break; }
@@ -1404,7 +1596,7 @@ static void silly_tick(uint32_t now)
     unsigned held = 0;
     for (unsigned k = 0; k < 27; ++k) held |= key_note[k] != 0xff && key_track[k] == track;
     unsigned want = 8192, ch = groove_midi_input_channel(track);
-    if (silly && held && !drum_track(track)) {
+    if (silly && (held || (fx_started && fx_key == 0 && playing)) && !drum_track(track)) {
         int t = (int)(now - bend_at), v = 0;
         switch (silly) {
         case SILLY_WOBBLE: v = tri((uint32_t)t, 160) * 2; break;                         /* vibrato */
@@ -1442,6 +1634,7 @@ void groove_screen_init(void)
     input_at = save_tried_at = warned_at = picked_at = 0;
     picking = pick_kind = 0;
     sound_panel = 0;
+    drum_style = 0; fx_key = 255; fx_started = fx_pulse_at = 0; fx_touched = 0;
     tidy_pending = 1;
     songs_panel = song_pick = 0;
     scale = chords = 0;
@@ -1470,6 +1663,7 @@ void groove_screen_init(void)
 static void select_track(unsigned t)
 {
     if (t == track) return;
+    fx_restore();
     release_keys();
     track = t; drum = 0; picking = 0;
     if (recording) groove_edit_record(1, track, 0);
@@ -1483,6 +1677,10 @@ void groove_screen_control(void)
     knobs_read(&c, now);
     groove_master_update(c.knob < KID_MASTER_LIMIT ? c.knob : KID_MASTER_LIMIT);
     uint32_t pressed = c.buttons & ~previous_buttons;
+    if (pressed & BUTTON(FX)) {
+        fx_started = now | 1U; fx_touched = 0;
+        fx_start(6, now); /* snapshot original settings for temporary knobs too */
+    }
     uint32_t key_down = c.keys & ~previous_keys;
     unsigned turned = 0;
     for (unsigned e = 0; e < 7; ++e) turned |= c.encoders[e] != 0;
@@ -1555,7 +1753,19 @@ void groove_screen_control(void)
         song_pick = (unsigned)clampi((int)song_pick + d, 0, SONGS - 1);
     } else if (c.encoders[0]) select_track((unsigned)clampi((int)track + c.encoders[0], 0, GROOVE_TRACKS - 1));
     arp_panel = (c.buttons & BUTTON(ARP)) != 0;
-    if (arp_panel) {                                   /* ARP held: K1..K4 are its timing */
+    if (fx_started) {
+        /* The four knobs become temporary effect controls while FX is held. */
+        if (c.encoders[2] || c.encoders[3] || c.encoders[4] || c.encoders[5]) fx_touched = 1;
+        if (c.encoders[2]) groove_control_edit(track, 0, fast(&c, 2), 0);
+        if (c.encoders[3]) bright_edit(fast(&c, 3));
+        if (c.encoders[4]) groove_sends_edit(track, 1, c.encoders[4]);
+        if (c.encoders[5]) groove_sends_edit(track, 0, c.encoders[5]);
+    } else if (sound_panel == 3 && drum_track(track)) {
+        if (c.encoders[2]) drum_set(11, "Accent", drum_value(11, "Accent") + fast(&c, 2));
+        if (c.encoders[3]) drum_set(drum, "Tune", drum_value(drum, "Tune") + fast(&c, 3));
+        if (c.encoders[4]) drum_set(drum, "Decay", drum_value(drum, "Decay") + fast(&c, 4));
+        if (c.encoders[5]) drum_set(drum, "Drive", drum_value(drum, "Drive") + fast(&c, 5));
+    } else if (arp_panel) {                                   /* ARP held: K1..K4 are its timing */
         static const uint8_t setting[4] = {0, 2, 3, 4};   /* rate, range, gate, swing */
         for (unsigned k = 0; k < 4; ++k)
             if (c.encoders[2 + k]) { groove_arp_edit(track, setting[k], c.encoders[2 + k]); arp_turned = 1; }
@@ -1569,13 +1779,30 @@ void groove_screen_control(void)
         if (c.encoders[4]) long_edit(fast(&c, 4));
         if (c.encoders[5]) groove_effects_edit(0, fast(&c, 5));
     } else {
-        if (c.encoders[2]) groove_control_edit(track, 0, fast(&c, 2), 0);
-        if (c.encoders[3]) bright_edit(kind(track) == GROOVE_DX7 ? c.encoders[3] : fast(&c, 3));
+        if (c.encoders[2]) {
+            groove_control_edit(track, 0, fast(&c, 2), 0);
+            struct groove_view now_view;
+            groove_get_view(track, 0, &now_view);
+            if (drum_track(track)) record_knob_lock(now_view.volume, 0);
+        }
+        if (c.encoders[3]) {
+            bright_edit(kind(track) == GROOVE_DX7 ? c.encoders[3] : fast(&c, 3));
+            struct bright b;
+            if (bright_target(track, &b)) record_knob_lock((unsigned)clampi(bright_value(track) * 127 / 100, 0, 127),
+                                                           b.fm ? b.param : b.param);
+        }
         if (c.encoders[4]) next_voice(c.encoders[4]);
         if (c.encoders[5]) groove_tempo_edit(fast(&c, 5));
     }
-    if (!songs_panel && mode == KID_BEAT && c.encoders[6] && drum_track(track))
+    if (!songs_panel && (mode == KID_BEAT || sound_panel == 3) && c.encoders[6] && drum_track(track))
         drum = (unsigned)clampi((int)drum + c.encoders[6], 0, (int)groove_pad_count(track) - 1);
+    if (sound_panel == 3 && drum_track(track) && c.encoders[1]) {
+        unsigned next = (unsigned)clampi((int)drum_style + c.encoders[1], 0, 3);
+        if (next != drum_style) {
+            drum_preset(next);
+            say(drum_style_names[next], kid_colors[1], now);
+        }
+    }
     /* ALGORITHM in BEAT: choose the part. A new part starts as a copy of the one before. */
     if (!songs_panel && mode == KID_BEAT && c.encoders[1]) {
         unsigned was = part;
@@ -1588,7 +1815,7 @@ void groove_screen_control(void)
         }
     }
     /* ALGORITHM in PLAY: turn to choose a new instrument; it changes once the knob rests. */
-    if (!songs_panel && mode == KID_PLAY && c.encoders[1]) {
+    if (!songs_panel && mode == KID_PLAY && sound_panel != 3 && c.encoders[1]) {
         if (!picking) pick_kind = look(track);
         pick_kind = (unsigned)(((int)pick_kind + c.encoders[1] % (int)I_COUNT + (int)I_COUNT) % (int)I_COUNT);
         picking = 1; picked_at = now;
@@ -1614,20 +1841,36 @@ void groove_screen_control(void)
     recording = groove_edit_recording();
     keyboard_channel = groove_midi_input_channel(track);
     unsigned old_mode = mode;
+    /* FX held: play six effects with the first six white keys. A tap with
+     * no effect keeps the existing two-tap START OVER shortcut. */
+    if (fx_started && (c.buttons & BUTTON(FX))) {
+        static const unsigned fx_keys[6] = {0, 2, 4, 6, 7, 9};
+        unsigned chosen = 255;
+        for (unsigned k = 0; k < 6; ++k) if (c.keys & (1U << fx_keys[k])) { chosen = k; break; }
+        if (chosen < 6) { fx_touched = 1; fx_start(chosen, now); }
+        else if (fx_key < 6) fx_start(6, now); /* key released: keep FX-knob snapshot */
+        fx_tick(now);
+        if (chosen < 6) key_down &= ~(1U << fx_keys[chosen]);
+    }
+    if (fx_started && !(c.buttons & BUTTON(FX))) {
+        fx_restore();
+        fx_started = 0;
+    }
     /* Start over: FX asks, FX again clears; anything else says no. */
     if (confirm_until) {
         if (pressed & BUTTON(FX)) {
             confirm_until = 0;
             say(groove_edit_clear(track, 0, 2) ? "OOPS" : "CLEARED", kid_colors[0], now);
+            fx_touched = 1; /* consuming the second tap must not re-arm on release */
             pressed &= ~BUTTON(FX);
         } else if (pressed || key_down || turned || (int32_t)(now - confirm_until) >= 0) {
             confirm_until = 0;
             pressed = 0; key_down = 0;
         }
-    } else if (pressed & BUTTON(FX)) {
+    } else if ((previous_buttons & BUTTON(FX)) && !(c.buttons & BUTTON(FX)) && !fx_touched) {
         confirm_until = (now + 4000U) | 1U;
-        pressed &= ~BUTTON(FX);
     }
+    pressed &= ~BUTTON(FX);
     if (pressed & BUTTON(ENV)) {
         songs_panel = !songs_panel;
         if (songs_panel) { learn_stop(); song_pick = current_song(); sound_panel = 0; }
@@ -1665,7 +1908,10 @@ void groove_screen_control(void)
         int failed = groove_project_save_slot(groove_project_slot());
         say(failed ? "OOPS" : "SAVED!", failed ? STOP : GO, now);
     }
-    if (pressed & BUTTON(EDIT)) { sound_panel = (sound_panel + 1U) % 3U; songs_panel = 0; }
+    if (pressed & BUTTON(EDIT)) {
+        sound_panel = (sound_panel + 1U) % (drum_track(track) ? 4U : 3U);
+        songs_panel = 0;
+    }
     if (pressed & BUTTON(LFO)) say(groove_edit_undo() ? "NO UNDO" : "UNDO!", kid_colors[4], now);
     /* ARP: a tap steps UP, DOWN, BOUNCE, RANDOM, OFF; holding it toggles latch. */
     if (pressed & BUTTON(ARP)) { arp_down_at = now | 1U; arp_long = arp_turned = 0; }
@@ -1699,8 +1945,9 @@ void groove_screen_control(void)
     if (mode != old_mode) release_keys();
 
     /* BEAT: white keys toggle steps; black keys pick what to place, and sound it. */
-    uint32_t live = c.keys;
-    if (mode == KID_BEAT) {
+    uint32_t live = fx_started ? 0 : c.keys;
+    if (fx_started) release_keys();
+    if (mode == KID_BEAT && !fx_started) {
         for (unsigned i = 0; i < 16; ++i) {
             if (key_down & (1U << white_keys[i])) toggle_step(i);
             live &= ~(1U << white_keys[i]);
