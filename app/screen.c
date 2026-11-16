@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-only WITH GPL-3.0-linking-exception */
 #include "kid/kid_config.h"
 #if FM1_KID_UI
+#include "kid/drumx_core.h"
 #include "kid/kid_screen.inc"
 #else
 #include "instrument.h"

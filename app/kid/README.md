@@ -158,3 +158,11 @@ Hold **FX** to bring up **SILLY FX**. The first six white keys (F3, G3, A3, B3, 
 When REC is active during playback, changes to **LOUD** on 808 tracks and **BRIGHT** on melodic tracks are written as parameter locks at the current sequencer step. This adds recorded variation to patterns within the existing lock system. Per-drum tune/decay automation and recording of the temporary FX are not yet supported by that lock system.
 
 On Drum Fun, the selected drum's tuning, decay and drive bars visually track knob movement; the kit preset name identifies the selected sound family.
+
+## Experimental DRUM-X audio preview (1.7)
+
+DRUM-X is an **opt-in hardware audio preview** layered over the existing FM1 native SDK: select a DRUMS track, press **EDIT** three times for DRUM FUN, then press **ENV** to toggle the DRUM-X preview (ENV returns to normal when leaving the preview). The native 808 track is temporarily muted while auditioning; stopping restores its original mute state. Turn the four sound knobs for MORPH, PITCH, DECAY, and CHAOS. Live black-key hits are sent to the 8-lane synthesizer. The sequencer control loop also forwards enabled drum steps to DRUM-X. Other instruments and the project data remain unchanged. No original 808 code has been deleted.
+
+**Important limitations (do not ship as a release yet):** This is an initial JIANT-inspired fixed-point sound renderer and factory voice adaptation, not a full or sonic-identical port of the original JIANT DRUM-X. It does not yet implement every oscillator pitch envelope, dynamic A/B patch editor, wavefolder, ghost/flam/ratchet timing, factory kit selection, or per-step morph automation. Live triggers and pattern triggers currently enter through the UI/control task rather than sample-accurate native sequencer timing. DRUM-X settings are not yet saved with the project; the original 808 drum tracks and saved songs remain fully intact. Both CPU headroom on hardware and cross-boundary GPL-only licensing need review prior to distribution.
+
+Attributions: JIANT FM `firmware/src/drumx_voice.c`, Copyright 2026 Juan Ignacio Antonucci and Hügelton Instruments, GPL-3.0-only. The adapted files `app/kid/drumx_core.c/.h` retain GPL-3.0-only. See https://github.com/juanjiant-bit/JIANT/blob/main/LICENSING.md .
