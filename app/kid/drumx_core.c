@@ -6,6 +6,8 @@
  * standalone fixed-point renderer is newly adapted for 44.1kHz/Q23 FM1
  * output and is NOT yet bit-for-bit or sound-for-sound identical to JIANT.
  */
+#include "kid_config.h"
+#if FM1_KID_UI
 #include "drumx_core.h"
 #include "fm1.h"
 #include <stdint.h>
@@ -168,3 +170,5 @@ FM1_AUDIO_CODE void fm1_kdx_mix(int32_t *stereo, unsigned frames)
         if (env < 64U) v->alive = 0;
     }
 }
+
+#endif /* FM1_KID_UI: original FM1 Open firmware remains unchanged */
