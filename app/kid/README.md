@@ -12,7 +12,7 @@ no separate patch import is required.
 | **SELECT** knob | Pick a tile. Each tile shows its instrument's picture and name |
 | **ALGORITHM** knob | Change the chosen tile's instrument: piano, organ, trumpet, flute, violin, choir, bells, xylophone, guitar, bass, robot, dream, game (chiptune), fun (samples) drums, magic, space or SFX. It switches when the knob rests |
 | **Piano keys** | Play the instrument. On melodic instruments every key fits the scale (HAPPY, a C major pentatonic, to start; see EDIT) |
-| *(fun)* | Every note played floats up its tile as a little coloured note; each tile's picture dances and shows a loudness bar while it sounds, also when the song plays it |
+| *(fun)* | All 18 instruments now have their own lively animation: their artwork moves differently and draws instrument-specific effects when played, including during song playback. The loudness bar also moves with the sound |
 | **SEQ** | BEAT mode: white keys switch the 16 steps on and off; black keys pick the drum (or note) to place. Other drums show as dots; melody steps show their note by colour and height |
 | **ALGORITHM** in BEAT | Choose the song part, A to D. Turning to a new part copies the part before it, ready to change. The song plays A, B, C, D in turn and BEAT follows along while it plays. A part with no steps left drops out of the song. In BEAT, PRESETS (or the black keys) picks the drum |
 | **HOME** | Tap: back to the instrument tiles. **Hold: help** — a screen showing what each button does on the page you are on (playing, BEAT, SOUND, KEYS, SONGS or PLAY ALONG); let go to go back |
@@ -144,6 +144,10 @@ Only the right key moves on; any key still plays. At the end it says YAY! and
 goes back to normal. HOME stops early. While playing along the keys use DO RE
 MI (every white key as printed) and chords are off; the earlier scale, chords
 and octave come back afterwards. Opening ENV also leaves Play Along.
+
+## Expressive animations (1.5)
+
+Every instrument now has its own motion and an instrument-specific animated second layer: piano cascading keys, organ pumping pipes, trumpet brass blasts, flute breath bubbles, violin bowing, choir harmonies, swinging bell clappers, xylophone mallets, guitar vibrating strings, bass sound waves, robot glitch scanning, dream drifting stars, game jumping pixels, fun falling confetti, drums bouncing sticks, magic orbiting spell particles, space scanning UFO lights, and SFX expanding electric fragments. Effects are integer-only drawing operations with no new bitmap or audio assets. A full visual gallery is generated in the main-branch emulator suite.
 
 ## Drum Fun and playable effects (1.6)
 
