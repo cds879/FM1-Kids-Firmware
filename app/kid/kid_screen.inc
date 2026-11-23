@@ -265,8 +265,6 @@ static int learn_octave;
 static unsigned sound_panel;
 /* Drum Fun and momentary live FX use existing 808/synth parameters, not samples. */
 static unsigned drum_style, fx_key = 255, fx_touched;
-static unsigned drumx_live, drumx_saved_mute, drumx_track = 255;
-static uint8_t drumx_last_step[8];
 static uint32_t fx_started, fx_pulse_at;
 static int fx_volume_before, fx_bright_before, fx_tempo_before, fx_silly_before;
 static unsigned fx_bright_param, fx_bright_part, fx_bright_raw, fx_bright_fm, fx_bright_valid;
@@ -1022,63 +1020,16 @@ static void draw_keys(void)
     text_center(160, 80, 205, "SILLY", 1, SOFT);
     text_center(160, 80, 217, silly_names[silly], 2, silly ? kid_colors[5] : OFF4);
 }
-/* DRUM-X is an opt-in overlay on one drum track. Its native 808 lane is
- * muted only for the current session, so existing projects remain editable.
- * Releasing the overlay restores the track's previous mute state. */
-static void drumx_stop(void)
-{
-    if (!drumx_live) return;
-    fm1_kdx_enable(0);
-    if (drumx_track < GROOVE_TRACKS) {
-        struct groove_view v;
-        groove_get_view(drumx_track, 0, &v);
-        if ((unsigned)v.muted != drumx_saved_mute) groove_mix_toggle(drumx_track, 0);
-    }
-    drumx_live = 0; drumx_track = 255;
-}
-static void drumx_start(void)
-{
-    if (!drum_track(track)) return;
-    drumx_stop();
-    struct groove_view v;
-    groove_get_view(track, 0, &v);
-    drumx_saved_mute = v.muted; drumx_track = track;
-    if (!v.muted) groove_mix_toggle(track, 0);
-    fm1_kdx_enable(1);
-    for (unsigned i = 0; i < GROOVE_TRACKS; ++i) drumx_last_step[i] = 255;
-    drumx_live = 1;
-}
-static unsigned drumx_lane(unsigned pad)
-{
-    /* Original 808 pad names: kick, snare, low/mid/high tom, rim,
-     * clap, cowbell, cymbal, open/closed hat. */
-    static const uint8_t map[11] = {KDX_KICK, KDX_SNARE, KDX_TOM, KDX_TOM,
-                                     KDX_TOM, KDX_RIM, KDX_CLAP, KDX_BELL,
-                                     KDX_BELL, KDX_HAT_O, KDX_HAT_C};
-    return pad < 11 ? map[pad] : KDX_KICK;
-}
-static void drumx_sequence_tick(void)
-{
-    if (!drumx_live || drumx_track >= GROOVE_TRACKS) return;
-    struct groove_view v;
-    groove_get_view(drumx_track, 0, &v);
-    if (!v.playing || v.play_step == drumx_last_step[drumx_track]) return;
-    drumx_last_step[drumx_track] = v.play_step;
-    struct groove_view step;
-    groove_get_view(drumx_track, v.play_step, &step);
-    for (unsigned d = 0; d < 11; ++d)
-        if ((step.step.drums >> d) & 1U) fm1_kdx_note(drumx_lane(d), step.step.velocity ? step.step.velocity : 100);
-}
 static void draw_drum_fun(void)
 {
     static const char *const labels[4] = {"PUNCH", "PITCH", "LENGTH", "WEIRD"};
     int v[4] = {drum_value(11, "Accent"), drum_value(drum, "Tune"),
                 drum_value(drum, "Decay"), drum_value(drum, "Drive")};
-    text(4, 192, drumx_live ? "DRUM-X (TEST)" : "DRUM FUN", 2, kid_colors[1]);
-    text(132, 193, drumx_live ? "MORPH" : drum_style_names[drum_style], 1, GO);
+    text(4, 192, "DRUM FUN", 2, kid_colors[1]);
+    text(132, 193, drum_style_names[drum_style], 1, GO);
     for (unsigned k = 0; k < 4; ++k) {
-        unsigned x = k * 60U, amount = drumx_live ? fm1_kdx_control_get(k) : v[k] < 0 ? 0U : (unsigned)v[k];
-        text_center(x, 60, 212, drumx_live ? (k == 0 ? "MORPH" : k == 1 ? "PITCH" : k == 2 ? "DECAY" : "CHAOS") : labels[k], 1, SOFT);
+        unsigned x = k * 60U, amount = v[k] < 0 ? 0U : (unsigned)v[k];
+        text_center(x, 60, 212, labels[k], 1, SOFT);
         fill(x + 8, 226, 44, 7, OFF);
         fill(x + 8, 226, amount * 44U / 127U, 7, kid_colors[k * 2U % 8U]);
     }
@@ -1550,7 +1501,6 @@ static unsigned current_song(void)
 }
 static int load_song(unsigned song)
 {
-    drumx_stop();
     release_keys();
     if (playing) { if (recording) groove_edit_record(0, track, 0); (void)post(0xfc, 0, 0, 1); }
     unsigned slot = groove_project_slot();
@@ -1684,7 +1634,6 @@ void groove_screen_init(void)
     input_at = save_tried_at = warned_at = picked_at = 0;
     picking = pick_kind = 0;
     sound_panel = 0;
-    drumx_live = 0; drumx_track = 255;
     drum_style = 0; fx_key = 255; fx_started = fx_pulse_at = 0; fx_touched = 0;
     tidy_pending = 1;
     songs_panel = song_pick = 0;
@@ -1812,16 +1761,10 @@ void groove_screen_control(void)
         if (c.encoders[4]) groove_sends_edit(track, 1, c.encoders[4]);
         if (c.encoders[5]) groove_sends_edit(track, 0, c.encoders[5]);
     } else if (sound_panel == 3 && drum_track(track)) {
-        if (drumx_live) {
-            for (unsigned k = 0; k < 4; ++k)
-                if (c.encoders[2 + k])
-                    fm1_kdx_control(k, (unsigned)clampi((int)fm1_kdx_control_get(k) + fast(&c, 2 + k), 0, 127));
-        } else {
         if (c.encoders[2]) drum_set(11, "Accent", drum_value(11, "Accent") + fast(&c, 2));
         if (c.encoders[3]) drum_set(drum, "Tune", drum_value(drum, "Tune") + fast(&c, 3));
         if (c.encoders[4]) drum_set(drum, "Decay", drum_value(drum, "Decay") + fast(&c, 4));
         if (c.encoders[5]) drum_set(drum, "Drive", drum_value(drum, "Drive") + fast(&c, 5));
-        }
     } else if (arp_panel) {                                   /* ARP held: K1..K4 are its timing */
         static const uint8_t setting[4] = {0, 2, 3, 4};   /* rate, range, gate, swing */
         for (unsigned k = 0; k < 4; ++k)
@@ -1853,7 +1796,7 @@ void groove_screen_control(void)
     }
     if (!songs_panel && (mode == KID_BEAT || sound_panel == 3) && c.encoders[6] && drum_track(track))
         drum = (unsigned)clampi((int)drum + c.encoders[6], 0, (int)groove_pad_count(track) - 1);
-    if (sound_panel == 3 && drum_track(track) && c.encoders[1] && !drumx_live) {
+    if (sound_panel == 3 && drum_track(track) && c.encoders[1]) {
         unsigned next = (unsigned)clampi((int)drum_style + c.encoders[1], 0, 3);
         if (next != drum_style) {
             drum_preset(next);
@@ -1928,11 +1871,6 @@ void groove_screen_control(void)
         confirm_until = (now + 4000U) | 1U;
     }
     pressed &= ~BUTTON(FX);
-    if ((pressed & BUTTON(ENV)) && sound_panel == 3 && drum_track(track)) {
-        if (drumx_live) { drumx_stop(); say("808 DRUMS", kid_colors[1], now); }
-        else { drumx_start(); say("DRUM-X!", kid_colors[1], now); }
-        pressed &= ~BUTTON(ENV);
-    }
     if (pressed & BUTTON(ENV)) {
         songs_panel = !songs_panel;
         if (songs_panel) { learn_stop(); song_pick = current_song(); sound_panel = 0; }
@@ -2005,7 +1943,6 @@ void groove_screen_control(void)
         say(view.muted ? "QUIET" : "ON", view.muted ? SOFT : GO, now);
     }
     if (mode != old_mode) release_keys();
-    if (drumx_live && (track != drumx_track || !drum_track(track))) drumx_stop();
 
     /* BEAT: white keys toggle steps; black keys pick what to place, and sound it. */
     uint32_t live = fx_started ? 0 : c.keys;
@@ -2034,11 +1971,6 @@ void groove_screen_control(void)
         if (held && key_note[key] == 0xff && note < 128) {
             uint8_t status = (uint8_t)(0x90 + groove_midi_input_channel(track)), notes[3];
             if (!post(status, (uint8_t)note, 100, 3)) break;
-            if (drumx_live && track == drumx_track) {
-                unsigned pad = 0;
-                while (pad < groove_pad_count(track) && groove_pad_note(track, pad) != note) ++pad;
-                if (pad < 11) fm1_kdx_note(drumx_lane(pad), 100);
-            }
             key_note[key] = (uint8_t)note;
             key_track[key] = (uint8_t)track;
             if (!drum_track(track)) beat_note = note;
@@ -2073,7 +2005,6 @@ void groove_screen_control(void)
         else learn_find_key();                             /* follows octave and instrument changes */
     }
     silly_tick(now);
-    drumx_sequence_tick();
     if (tidy_pending) tidy_tracks(now);
     autosave(now);
     previous_buttons = c.buttons;
