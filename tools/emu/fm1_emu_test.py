@@ -489,7 +489,7 @@ def kid_checks(emu, fwsc, out, profile="full"):
     # Stage gallery (stage-gallery.png, and base64 in the log): the screen at
     # half size for several instruments a moment after a note, plus the readout.
     shots = [(f"instrument-actions-{k}", 3300) for k in ("organ", "violin", "robot", "drums", "magic", "space")]
-    shots += [("sparks", 3300), ("sparks", 4700)]
+    shots += [("sparks", 3300), ("sparks", 4700), ("readout", 2900), ("readout", 3300), ("readout", 3600), ("readout", 5700)]
     cells = []
     for work, ms in shots:
         try:
@@ -497,9 +497,9 @@ def kid_checks(emu, fwsc, out, profile="full"):
             cells.append(b"".join(px[(y * w + x) * 3:(y * w + x) * 3 + 3] for y in range(0, h, 2) for x in range(0, w, 2)))
         except (FileNotFoundError, IndexError):
             cells.append(b"\0" * 240 * 240 * 3)
-    rows = [cells[:4], cells[4:]]
+    rows = [cells[i:i + 4] for i in range(0, len(cells), 4)]
     sheet = b"".join(b"".join(cell[y * 720:(y + 1) * 720] for cell in row) for row in rows for y in range(240))
-    write_png(out / "stage-gallery.png", (960, 480, sheet))
+    write_png(out / "stage-gallery.png", (960, 240 * len(rows), sheet))
     import base64
     print("STAGE-PNG-BEGIN")
     print(base64.b64encode((out / "stage-gallery.png").read_bytes()).decode())
