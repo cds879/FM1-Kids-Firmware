@@ -167,6 +167,17 @@ def frame_lcd(work, ms):
     return crop(read_ppm(work / "frames" / f"{ms // 100:06d}.ppm"), LCD)
 
 
+def still_part(work, ms):
+    """The screen without the stage (screen rows 40-159, drawn 2x), which never stops moving."""
+    w, h, px = frame_lcd(work, ms)
+    return px[:80 * w * 3] + px[320 * w * 3:]
+
+
+def stage_part(work, ms):
+    w, h, px = frame_lcd(work, ms)
+    return px[80 * w * 3:320 * w * 3]
+
+
 def check(name, emu, fwsc, out):
     """Run one scenario; returns (checks, artefacts)."""
     _, ms, keys, _ = next(s for s in SCENARIOS if s[0] == name)
@@ -356,14 +367,16 @@ def kid_checks(emu, fwsc, out, profile="full"):
     results[name] = c
     # Animations: a played note floats up its tile and the tile dances; the screen settles after.
     name = "sparks"
-    r, c = kid_run(emu, fwsc, out, name, 7000, "3000:C4@100,3500:C4^")
+    r, c = kid_run(emu, fwsc, out, name, 7000, "3000:C4@100,3500:C4^,4500:e2:-3")
     try:
         f1, f2 = frame_lcd(out / name, 3150)[2], frame_lcd(out / name, 3400)[2]
-        s1, s2 = frame_lcd(out / name, 6000)[2], frame_lcd(out / name, 6800)[2]
+        s1, s2 = still_part(out / name, 6000), still_part(out / name, 6800)
+        i1, i2 = stage_part(out / name, 6000), stage_part(out / name, 6800)
     except (FileNotFoundError, IndexError):
-        f1 = f2 = s1 = s2 = None
-    c += [("the tile moves while a note plays", f1 is not None and f1 != f2, "frames at 3.15 s and 3.4 s differ"),
-          ("the screen settles afterwards", s1 is not None and s1 == s2, "frames at 6 s and 6.8 s match")]
+        f1 = f2 = s1 = s2 = i1 = i2 = None
+    c += [("the stage moves while a note plays", f1 is not None and f1 != f2, "frames at 3.15 s and 3.4 s differ"),
+          ("the stage keeps moving gently", i1 is not None and i1 != i2, "stage at 6 s and 6.8 s differs"),
+          ("the rest of the screen settles", s1 is not None and s1 == s2, "outside the stage at 6 s and 6.8 s match")]
     # The song playing moves the pictures too (no keys pressed).
     r, c1 = kid_run(emu, fwsc, out, f"{name}-song", 6000, PATTERN + ",2200:HOME,2300:HOME^,2500:PLAY,2600:PLAY^")
     try:
@@ -443,7 +456,8 @@ def kid_checks(emu, fwsc, out, profile="full"):
     except (FileNotFoundError, IndexError):
         before = play_help = after = beat = beat_help = home_again = None
     c += [("holding HOME shows help", play_help is not None and play_help != before, "screen changed"),
-          ("letting go goes back", after == before, "same screen as before"),
+          ("letting go goes back", after is not None and still_part(out / name, 5300) == still_part(out / name, 2900),
+           "same screen as before (outside the moving stage)"),
           ("BEAT has its own help", beat_help is not None and beat_help not in (beat, play_help), "different page"),
           ("a held HOME does not leave BEAT", home_again == beat, "still in BEAT after the help")]
     results[name] = c
@@ -458,6 +472,38 @@ def kid_checks(emu, fwsc, out, profile="full"):
         print("HELP-PNG-END")
     except (FileNotFoundError, IndexError):
         pass
+    # Big knob readout: turning a knob shows its name, value and bar big for a moment.
+    name = "readout"
+    r, c = kid_run(emu, fwsc, out, name, 6000, "2000:SEQ,2100:SEQ^,3000:e2:-5,5500:e5:2")
+    try:
+        def top_row(ms):                   # BEAT's top row: screen rows 42-81, drawn 2x
+            w, h, px = frame_lcd(out / name, ms)
+            return px[84 * w * 3:164 * w * 3]
+        before, during, after, speed = (top_row(ms) for ms in (2900, 3300, 4600, 5700))
+    except (FileNotFoundError, IndexError):
+        before = during = after = speed = None
+    c += [("turning LOUD shows it big", during is not None and during != before, "BEAT's top row changed"),
+          ("it goes away by itself", after == before, "same screen 1.6 s later"),
+          ("SPEED shows its own", speed is not None and speed not in (before, during), "different readout")]
+    results[name] = c
+    # Stage gallery (stage-gallery.png, and base64 in the log): the screen at
+    # half size for several instruments a moment after a note, plus the readout.
+    shots = [(f"instrument-actions-{k}", 3300) for k in ("organ", "violin", "robot", "drums", "magic", "space")]
+    shots += [("sparks", 3300), ("sparks", 4700)]
+    cells = []
+    for work, ms in shots:
+        try:
+            w, h, px = frame_lcd(out / work, ms)
+            cells.append(b"".join(px[(y * w + x) * 3:(y * w + x) * 3 + 3] for y in range(0, h, 2) for x in range(0, w, 2)))
+        except (FileNotFoundError, IndexError):
+            cells.append(b"\0" * 240 * 240 * 3)
+    rows = [cells[:4], cells[4:]]
+    sheet = b"".join(b"".join(cell[y * 720:(y + 1) * 720] for cell in row) for row in rows for y in range(240))
+    write_png(out / "stage-gallery.png", (960, 480, sheet))
+    import base64
+    print("STAGE-PNG-BEGIN")
+    print(base64.b64encode((out / "stage-gallery.png").read_bytes()).decode())
+    print("STAGE-PNG-END")
     # Quiet: SEL (SCL in the emulator) mutes the chosen instrument and unmutes it again.
     name = "quiet"
     r, c = kid_run(emu, fwsc, out, name, 6500, PATTERN + ",2200:PLAY,2300:PLAY^,3000:HOME,3100:HOME^,3200:SCL,3300:SCL^,4500:SCL,4600:SCL^")
