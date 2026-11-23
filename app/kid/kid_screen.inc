@@ -186,36 +186,15 @@ static unsigned beat_note = 60;
  * BEAT shows and edits one part; ALGORITHM chooses it. */
 enum { PARTS = 4 };
 static unsigned part, song_parts = 1;
-/* Animations. Each instrument moves its picture its own way when it plays
- * (a drum jumps, a bass rumbles, a bell swings, ...) and sends its own kind
- * of sparks out of it (notes, stars, puffs of air, rings, pixels, bangs). */
-enum { SPARKS = 10, SPARK_MS = 950, MOVE_MS = 480 };
-/* Every instrument has its own motion and an extra tile accent.
- * Small integer-only drawing effects: no new sprites, audio, or assets. */
-enum { M_KEYS, M_PIPES, M_HORN, M_WIND, M_BOW, M_VOICES, M_BELL,
-       M_MALLET, M_STRUM, M_BASS, M_ROBOT, M_DREAM, M_GAME, M_CONFETTI,
-       M_DRUM, M_WAND, M_UFO, M_IMPACT };
-enum { P_NOTE, P_STAR, P_PIXEL, P_PUFF, P_RING, P_BANG,
-       P_GLITTER, P_BEAM, P_ZAP };
-static const struct { uint8_t move, spark; } kind_anim[I_COUNT] = {
-    {M_KEYS, P_NOTE},       /* PIANO: jumping keys */
-    {M_PIPES, P_PUFF},     /* ORGAN: pulsing pipes */
-    {M_HORN, P_PUFF},      /* TRUMPET: brassy blast */
-    {M_WIND, P_PUFF},      /* FLUTE: wind stream */
-    {M_BOW, P_NOTE},       /* VIOLIN: bow strokes */
-    {M_VOICES, P_RING},    /* CHOIR: layered harmonies */
-    {M_BELL, P_RING},      /* BELLS: pendulum swing */
-    {M_MALLET, P_STAR},    /* XYLOPHONE: striking mallet */
-    {M_STRUM, P_NOTE},     /* GUITAR: string strum */
-    {M_BASS, P_RING},      /* BASS: deep tremor */
-    {M_ROBOT, P_PIXEL},    /* ROBOT: glitch flicker */
-    {M_DREAM, P_STAR},     /* DREAM: slow floating */
-    {M_GAME, P_PIXEL},     /* GAME: 8-bit jump */
-    {M_CONFETTI, P_STAR}, /* FUN: tumbling confetti */
-    {M_DRUM, P_BANG},      /* DRUMS: double strike */
-    {M_WAND, P_GLITTER},   /* MAGIC: wand flourish */
-    {M_UFO, P_BEAM},       /* SPACE: hover and scan */
-    {M_IMPACT, P_ZAP}};    /* SFX: electric impact */
+/* Animations. Every note starts a spark; the stage shows the chosen
+ * instrument's scene (one of five themes) and its own little action, and
+ * the strip's icons bounce when their instrument plays. */
+enum { SPARKS = 10, SPARK_MS = 950 };
+enum { T_NOTES, T_RINGS, T_STARS, T_PADS, T_PIXELS };
+static const uint8_t kind_theme[I_COUNT] = {
+    T_NOTES, T_NOTES, T_NOTES, T_NOTES, T_NOTES, T_RINGS,   /* piano organ trumpet flute violin choir */
+    T_RINGS, T_RINGS, T_NOTES, T_RINGS, T_PIXELS, T_STARS,  /* bells xylophone guitar bass robot dream */
+    T_PIXELS, T_NOTES, T_PADS, T_STARS, T_STARS, T_PADS};   /* game fun drums magic space sfx */
 static struct { uint8_t note, track, kind; uint32_t at; } sparks[SPARKS];
 static unsigned spark_next;
 static uint32_t hit_at[GROOVE_TRACKS];  /* when each instrument last started a note */
@@ -229,6 +208,13 @@ static void spark(unsigned t, unsigned note, uint32_t now)
     spark_next = (spark_next + 1U) % SPARKS;
 }
 static uint32_t part_at;
+/* PLAY mode: the stage (the chosen instrument's scene) over a strip of the
+ * eight instruments as small icons. */
+enum { STAGE_Y = 40, STAGE_H = 120, STRIP_Y = 160, STRIP_H = 30 };
+/* Turning K1..K4 shows the knob big for a moment: name, value and bar. */
+enum { READOUT_MS = 1200 };
+static unsigned readout_k;
+static uint32_t readout_at;
 static int octave;
 static uint32_t previous_buttons, previous_keys, notice_until, confirm_until;
 static uint32_t booted_at, input_at, save_tried_at, warned_at, picked_at;
@@ -336,15 +322,19 @@ static void text_center(unsigned x, unsigned w, unsigned y, const char *s, unsig
     unsigned tw = text_width(s, scale);
     text(x + (w > tw ? (w - tw) / 2 : 0), y, s, scale, color);
 }
-/* An instrument picture, 48x36 on screen (or 32x24 with small). */
-static void picture(unsigned x, unsigned y, unsigned k, unsigned small, uint16_t color)
+/* An instrument picture at any scale. */
+static void picture_at(unsigned x, unsigned y, unsigned k, unsigned scale, uint16_t color)
 {
     unsigned w = kind_icon[k].w, h = kind_icon[k].h;
-    unsigned scale = (w == 24 ? 2U : 3U) - (small ? 1U : 0U);
     if (y >= paint_top + PAINT_ROWS || y + h * scale <= paint_top) return;
     for (unsigned r = 0; r < h; ++r)
         for (unsigned c = 0; c < w; ++c)
             if (kind_icon[k].rows[r] & (1UL << (w - 1U - c))) fill(x + c * scale, y + r * scale, scale, scale, color);
+}
+/* 48x36 on screen (or 32x24 with small). */
+static void picture(unsigned x, unsigned y, unsigned k, unsigned small, uint16_t color)
+{
+    picture_at(x, y, k, (kind_icon[k].w == 24 ? 2U : 3U) - (small ? 1U : 0U), color);
 }
 static void number(char out[8], unsigned value)
 {
@@ -354,6 +344,73 @@ static void number(char out[8], unsigned value)
     out[n] = 0;
 }
 static uint16_t dim(uint16_t c) { return (uint16_t)((c >> 1) & 0x7bef); }
+
+/* ---------- smooth drawing, for the stage ----------
+ * Soft-edged discs, rings and glows, drawn straight into the band being
+ * painted and blended with what is there. The idea and the look follow h1's
+ * renderer (github.com/jakehandy/h1, MIT licence, (c) 2026 Jake Handy); this
+ * is a small integer version written for the band painter. Coverage is in
+ * 1/16 of a pixel. */
+static int sx0, sy0, sx1, sy1;                 /* where smooth shapes may draw */
+static uint16_t blend(uint16_t a, uint16_t b, unsigned t)   /* b over a, t 0..16 */
+{
+    unsigned u = 16U - t;
+    return (uint16_t)(((((a >> 11) * u + (b >> 11) * t) >> 4) << 11) |
+                      (((((a >> 5) & 63U) * u + ((b >> 5) & 63U) * t) >> 4) << 5) |
+                      (((a & 31U) * u + (b & 31U) * t) >> 4));
+}
+static unsigned isqrt32(uint32_t v)
+{
+    uint32_t r = 0, b = 1UL << 30;
+    while (b > v) b >>= 2;
+    for (; b; b >>= 2)
+        if (v >= r + b) { v -= r + b; r = (r >> 1) + b; } else r >>= 1;
+    return (unsigned)r;
+}
+enum { S_DISC, S_RING, S_GLOW };
+/* One soft round shape at strength a (0..16): a disc, a ring w wide, or a
+ * glow that fades out towards its edge. */
+static void soft(int cx, int cy, int r, int w, unsigned shape, uint16_t color, unsigned a)
+{
+    if (!a || r <= 0) return;
+    if (a > 16) a = 16;
+    int reach = r + w / 2 + 2, top = (int)paint_top, x0 = cx - reach, x1 = cx + reach, y0 = cy - reach, y1 = cy + reach;
+    if (y0 < top) y0 = top;
+    if (y0 < sy0) y0 = sy0;
+    if (y1 > top + PAINT_ROWS - 1) y1 = top + PAINT_ROWS - 1;
+    if (y1 > sy1 - 1) y1 = sy1 - 1;
+    if (x0 < (int)paint_x) x0 = (int)paint_x;
+    if (x0 < sx0) x0 = sx0;
+    if (x1 > (int)paint_end - 1) x1 = (int)paint_end - 1;
+    if (x1 > sx1 - 1) x1 = sx1 - 1;
+    int r16 = r * 16, half = w * 8, inner = shape == S_RING ? r - w / 2 - 1 : r - 1;
+    uint32_t far = (uint32_t)(reach * reach), near = inner > 0 ? (uint32_t)(inner * inner) : 0;
+    unsigned stride = paint_end - paint_x;
+    for (int y = y0; y <= y1; ++y)
+        for (int x = x0; x <= x1; ++x) {
+            int dx = x - cx, dy = y - cy;
+            uint32_t d2 = (uint32_t)(dx * dx + dy * dy);
+            if (d2 >= far || (shape == S_RING && d2 < near)) continue;
+            int cov;
+            if (shape == S_DISC && d2 < near) cov = 16;
+            else {
+                int d = (int)isqrt32(d2 << 8), e = d - r16;
+                cov = shape == S_DISC ? 8 - e : shape == S_RING ? half + 8 - (e < 0 ? -e : e)
+                                                                : (e >= 0 ? 0 : -e * 16 / r16);
+            }
+            if (cov <= 0) continue;
+            uint16_t *px = &paint_pixels[(unsigned)(y - top) * stride + (unsigned)(x - (int)paint_x)];
+            *px = blend(*px, color, (unsigned)(cov > 16 ? 16 : cov) * a / 16U);
+        }
+}
+static void sdisc(int x, int y, int r, uint16_t c, unsigned a) { soft(x, y, r, 0, S_DISC, c, a); }
+static void sring(int x, int y, int r, int w, uint16_t c, unsigned a) { soft(x, y, r, w, S_RING, c, a); }
+static void sglow(int x, int y, int r, uint16_t c, unsigned a) { soft(x, y, r, 0, S_GLOW, c, a); }
+static uint32_t hash32(uint32_t v)
+{
+    v ^= v >> 16; v *= 0x7feb352dU; v ^= v >> 15; v *= 0x846ca68bU;
+    return v ^ (v >> 16);
+}
 
 /* ---------- helpers ---------- */
 static int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v; }
@@ -410,6 +467,7 @@ static unsigned program_of(unsigned t)
     return v.program;
 }
 static void release_keys(void);
+static int tri(uint32_t t, uint32_t p);
 static unsigned chord_notes(unsigned root, uint8_t out[3]);
 static unsigned current_song(void);
 static void draw_songs(void);
@@ -825,6 +883,86 @@ int groove_kid_route(const uint8_t *m, size_t n, uint8_t out[3])
     return 1;
 }
 
+static uint32_t mix(uint32_t s, uint32_t v) { return s * 131U + v; }
+/* ---------- the big knob readout ---------- */
+static unsigned readout_on(void) { return readout_at && clock_now - readout_at < READOUT_MS; }
+/* What knob k does on the page you are on: its name, its value as text, and
+ * how far it is turned (0..100; -1 when it is a choice, not an amount). */
+static int knob_info(unsigned k, const char **label, char val[12])
+{
+    static const char *const base[4] = {"LOUD", "BRIGHT", "SOUND", "SPEED"};
+    static const char *const sound[4] = {"REVERB", "ECHO", "LONG", "ROOM"};
+    static const char *const arp[4] = {"FAST", "OCTAVES", "LENGTH", "SWING"};
+    static const char *const drums[4] = {"PUNCH", "PITCH", "LENGTH", "WEIRD"};
+    static const char *const keys[4] = {"SCALE", "CHORDS", "SILLY", "-"};
+    static const char *const rates[4] = {"1/4", "1/8", "1/16", "1/32"};
+    int v = -1;
+    val[0] = 0;
+    k &= 3U;
+    if (arp_panel) {
+        unsigned a = groove_arp_setting(track, k ? k + 1U : 0U);
+        *label = arp[k];
+        if (k == 0) { strcpy(val, rates[a & 3U]); return (int)(a & 3U) * 33; }
+        if (k == 1) { number(val, a + 1U); return (int)(a & 3U) * 33; }
+        v = k == 2 ? (int)(a + 1U) * 25 : (int)a * 2;
+        number(val, k == 2 ? (unsigned)v : a);
+        return v;
+    }
+    if (sound_panel == 3 && drum_track(track)) {
+        int d = drum_value(k ? drum : 11, k == 0 ? "Accent" : k == 1 ? "Tune" : k == 2 ? "Decay" : "Drive");
+        *label = drums[k];
+        v = d < 0 ? -1 : d * 100 / 127;
+    } else if (sound_panel == 2) {
+        *label = keys[k];
+        strcpy(val, k == 0 ? scales[scale].name : k == 1 ? (chords ? "ON" : "OFF") : k == 2 ? silly_names[silly] : "-");
+        return -1;
+    } else if (sound_panel) {
+        int sv[4];
+        sound_values(sv);
+        *label = sound[k];
+        v = sv[k];
+    } else {
+        *label = base[k];
+        if (k == 2) { sound_name(track, val); return -1; }
+        if (k == 3) { number(val, view.tempo); return clampi(((int)view.tempo - 40) / 2, 0, 100); }
+        v = k ? bright_value(track) : (int)view.volume * 100 / 127;
+    }
+    if (v < 0) strcpy(val, "-");
+    else number(val, (unsigned)v);
+    return v;
+}
+static uint32_t readout_sig(void)
+{
+    const char *label;
+    char val[12];
+    uint32_t s = mix(readout_k + 1U, (uint32_t)(knob_info(readout_k, &label, val) + 2));
+    for (const char *c = val; *c; ++c) s = mix(s, (uint8_t)*c);
+    return mix(s, (uint32_t)(uintptr_t)label);
+}
+/* Big in the stage; compact (one line) in BEAT's top row. */
+static void draw_readout(unsigned x, unsigned y, unsigned w, unsigned h)
+{
+    const char *label;
+    char val[12];
+    int v = knob_info(readout_k, &label, val);
+    uint16_t c = kid_colors[(readout_k * 2U + 1U) % 8U];
+    unsigned n = (unsigned)strlen(val);
+    fill(x, y, w, h, BG);
+    frame(x, y, w, h, 2, c);
+    if (h < 60) {
+        text(x + 8, y + 7, label, 2, c);
+        text(x + w - 8 - text_width(val, n <= 5 ? 2 : 1), y + 7, val, n <= 5 ? 2 : 1, INK);
+    } else {
+        unsigned sc = n <= 4 ? 4U : n <= 6 ? 3U : 2U;
+        text_center(x, w, y + 8, label, 2, c);
+        text_center(x, w, y + 30 + (4U - sc) * 4U, val, sc, INK);
+    }
+    if (v >= 0) {
+        fill(x + 10, y + h - 12, w - 20, 6, OFF);
+        fill(x + 10, y + h - 12, (w - 20) * (unsigned)v / 100U, 6, c);
+    }
+}
+
 /* ---------- screen elements ---------- */
 /* Each element has a rectangle and a signature of everything it shows. Only
  * elements whose signature changed are repainted. */
@@ -839,13 +977,13 @@ static int rect(unsigned e, unsigned *x, unsigned *y, unsigned *w, unsigned *h)
     if (e == E_FOOT) { *x = 0; *y = 190; *w = 240; *h = 50; return 1; }
     unsigned i = e - E_ITEMS;
     if (mode == KID_PLAY) {
-        if (i >= 8) return 0;
-        *x = 4 + (i % 4U) * 59U; *y = 46 + (i / 4U) * 72U; *w = 55; *h = 68; return 1;
+        if (i < 8) { *x = i * 30U; *y = STRIP_Y; *w = 30; *h = STRIP_H; return 1; }
+        if (i == 8) { *x = 0; *y = STAGE_Y; *w = 240; *h = STAGE_H; return 1; }
+        return 0;
     }
     if (i == 16) { *x = 0; *y = 42; *w = 240; *h = 40; return 1; }   /* what the black keys picked */
     *x = 4 + (i % 8U) * 29U; *y = 88 + (i / 8U) * 50U; *w = 27; *h = 44; return 1;
 }
-static uint32_t mix(uint32_t s, uint32_t v) { return s * 131U + v; }
 static uint32_t signature(unsigned e)
 {
     uint32_t base = mode | track << 1;
@@ -886,30 +1024,28 @@ static uint32_t signature(unsigned e)
     }
     unsigned i = e - E_ITEMS;
     if (mode == KID_PLAY) {
-        if (i >= 8) return 0;
+        if (i > 8) return 0;
+        unsigned t = i == 8 ? track : i;
         struct groove_view v;
-        groove_get_view(i, 0, &v);
-        unsigned sounding = 0;
-        for (unsigned k = 0; k < 27; ++k) sounding |= key_note[k] != 0xff && key_track[k] == i;
-        uint32_t s = (i == track) | (uint32_t)v.muted << 4 | sounding << 5 | 1U << 6 |
-                     (uint32_t)(picking && i == track) << 7 | groove_arp_enabled(i) << 8 |
-                     groove_arp_setting(i, 5) << 9 | shown_kind(i) << 10;
-        s = mix(s, v.audible ? v.level / 8U + 1U : 0);
-        if (hit_at[i] && clock_now - hit_at[i] < MOVE_MS) s = mix(s, (clock_now - hit_at[i]) / 30U + 1U);
-        if (i == track && fx_started) s = mix(s, 0x60000U | fx_key << 8 | (clock_now / 85U & 7U));
-        if (i == track && drum_track(i) && sound_panel == 3)
-            s = mix(s, (unsigned)(drum_value(drum, "Tune") + 1) | 
-                       (unsigned)(drum_value(11, "Accent") + 1) << 8 |
-                       (unsigned)(drum_value(drum, "Drive") + 1) << 16);
-
-        for (unsigned k = 0; k < SPARKS; ++k)
-            if (sparks[k].at && sparks[k].track == i && clock_now - sparks[k].at < SPARK_MS)
-                s = mix(mix(s, sparks[k].note), (clock_now - sparks[k].at) / 25U + 1U);
+        groove_get_view(t, 0, &v);
+        uint32_t s = (i == track) | (uint32_t)v.muted << 1 | (uint32_t)(picking && t == track) << 2 |
+                     shown_kind(t) << 3 | groove_arp_enabled(t) << 8 | groove_arp_setting(t, 5) << 9;
+        if (i < 8) {
+            s = mix(s, v.audible && !v.muted ? v.level / 16U + 1U : 0);
+            if (hit_at[i] && clock_now - hit_at[i] < 240U) s = mix(s, (clock_now - hit_at[i]) / 40U + 1U);
+            return s;
+        }
+        /* The stage always moves a little; faster while something is happening. */
+        unsigned busy = readout_on() || (hit_at[track] && clock_now - hit_at[track] < SPARK_MS) || fx_started ||
+                        sound_panel == 3;
+        for (unsigned k = 0; k < SPARKS && !busy; ++k) busy = sparks[k].at && clock_now - sparks[k].at < SPARK_MS;
+        s = mix(mix(s, readout_on() ? readout_sig() : 0), clock_now / (busy ? 40U : 90U));
         return s;
     }
     if (i == 16)
-        return mix(base | drum << 4 | beat_note << 8 | look(track) << 16,
-                   part | song_parts << 2 | (playing ? play_step / KID_STEPS + 1U : 0) << 5);
+        return mix(mix(base | drum << 4 | beat_note << 8 | look(track) << 16,
+                       part | song_parts << 2 | (playing ? play_step / KID_STEPS + 1U : 0) << 5),
+                   readout_on() ? readout_sig() : 0);
     i += part * KID_STEPS;
     struct groove_view v;
     groove_get_view(track, i, &v);
@@ -1089,128 +1225,6 @@ static void cfill(int x, int y, int w, int h, uint16_t color)
     if (y + h > clip_y1) h = clip_y1 - y;
     if (w > 0 && h > 0) fill((unsigned)x, (unsigned)y, (unsigned)w, (unsigned)h, color);
 }
-/* How a picture moves after its instrument starts a note. */
-static void tile_move(unsigned t, unsigned look_i, int *dx, int *dy, unsigned *lit)
-{
-    uint32_t age = clock_now - hit_at[t];
-    if (!hit_at[t] || age >= MOVE_MS) return;
-    int left = (int)(MOVE_MS - age);
-    unsigned phase = age / 50U;
-    *lit = age < 100U;
-    switch (kind_anim[look_i].move) {
-    case M_KEYS:     *dy = phase & 1U ? -left * 5 / MOVE_MS : 2; break;
-    case M_PIPES:    *dy = phase % 3U == 0 ? -3 : 1; *lit = (phase & 1U) == 0; break;
-    case M_HORN:     *dx = age < 130U ? -5 : age < 270U ? 2 : 0; break;
-    case M_WIND:     *dx = (int)(phase % 4U) - 2; *dy = -left * 2 / MOVE_MS; break;
-    case M_BOW:      *dx = phase & 1U ? 3 : -3; *dy = phase & 2U ? -2 : 1; break;
-    case M_VOICES:   *dy = phase % 4U < 2U ? -2 : 2; *lit = (phase % 3U) != 0; break;
-    case M_BELL:     *dx = phase % 4U == 0 ? 0 : phase % 4U == 1 ? 4 : phase % 4U == 2 ? 0 : -4; break;
-    case M_MALLET:   *dy = age < 100U ? -6 : age < 240U ? 3 : 0; break;
-    case M_STRUM:    *dx = phase & 1U ? 3 : -3; *dy = age < 170U ? 2 : -1; break;
-    case M_BASS:     *dx = phase & 1U ? 2 : -2; *dy = phase & 2U ? 3 : 0; break;
-    case M_ROBOT:    *dx = phase % 3U == 0 ? -3 : phase % 3U == 1 ? 3 : 0; *lit = (phase & 1U) == 0; break;
-    case M_DREAM:    *dy = phase < 5U ? -(int)phase : (int)phase - 9; *dx = phase & 2U ? 1 : -1; break;
-    case M_GAME:     *dy = age < 140U ? -8 : age < 300U ? -4 : 0; *dx = phase & 1U ? 2 : 0; break;
-    case M_CONFETTI: *dx = phase & 1U ? -2 : 2; *dy = phase % 3U == 0 ? -4 : 1; break;
-    case M_DRUM:     *dy = age < 110U || (age > 200U && age < 320U) ? -6 : 2; break;
-    case M_WAND:     *dx = phase & 1U ? 3 : -3; *dy = -left * 4 / MOVE_MS; break;
-    case M_UFO:      *dy = (phase / 2U) & 1U ? -4 : 1; *dx = phase % 4U == 0 ? -2 : 1; *lit = (phase & 3U) < 2U; break;
-    case M_IMPACT:   *dx = phase & 1U ? -4 : 4; *dy = left * 2 / MOVE_MS; *lit = (phase & 1U) == 0; break;
-    }
-}
-/* One spark, by kind; age runs 0..SPARK_MS. ink stands out on the tile; tint
- * is the note's colour, used for the small middle parts. */
-static void draw_spark(unsigned kind_s, unsigned note, uint32_t age, int x, int y, unsigned w, unsigned h, uint16_t ink)
-{
-    uint16_t tint = note_colors[note % 12U];
-    int cx = x + 28, cy = y + 26, a = (int)age, n = (int)(note % 12U);
-    switch (kind_s) {
-    case P_NOTE: {                                   /* a big note floats up, side to side */
-        int nx = x + 6 + n * ((int)w - 20) / 11 + ((a / 120) & 1 ? 2 : 0), ny = y + (int)h - 28 - a * ((int)h - 34) / SPARK_MS;
-        cfill(nx, ny + 9, 6, 4, ink); cfill(nx + 1, ny + 8, 4, 6, ink);    /* head */
-        cfill(nx + 4, ny, 2, 10, ink); cfill(nx + 6, ny + 1, 2, 2, ink); cfill(nx + 7, ny + 3, 2, 2, ink);  /* stem, flag */
-        cfill(nx + 2, ny + 10, 2, 2, tint);
-        break;
-    }
-    case P_STAR: {                                   /* stars twinkle up and out */
-        for (int k = 0; k < 2; ++k) {
-            int sx = x + 8 + ((n + k * 5) % 12) * ((int)w - 18) / 11, sy = cy + 10 - a * 46 / SPARK_MS - k * 10;
-            int r = ((a / 70) + k) & 1 ? 2 : 4;
-            cfill(sx - r, sy - 1, 2 * r + 2, 2, ink); cfill(sx - 1, sy - r, 2, 2 * r + 2, ink);
-            cfill(sx - 1, sy - 1, 2, 2, tint);
-        }
-        break;
-    }
-    case P_PIXEL: {                                  /* blocks fly out */
-        static const int8_t dir[8][2] = {{3, -2}, {-3, -2}, {2, -3}, {-2, -3}, {3, 1}, {-3, 1}, {1, -3}, {-1, -3}};
-        int d = a * 8 / SPARK_MS;
-        for (int k = 0; k < 3; ++k) {
-            const int8_t *v = dir[(n + k * 3) % 8];
-            cfill(cx + v[0] * d - 3, cy + v[1] * d - 3, 6, 6, ink);
-            cfill(cx + v[0] * d - 1, cy + v[1] * d - 1, 2, 2, tint);
-        }
-        break;
-    }
-    case P_PUFF: {                                   /* puffs of air blow out the right side */
-        for (int k = 0; k < 3; ++k) {
-            int px = x + 30 + a * 30 / SPARK_MS + k * 7, py = y + 10 + ((n + k) % 3) * 9 - k * 2;
-            int r = 2 + a * 3 / SPARK_MS;
-            cfill(px - r, py - 1, 2 * r + 1, 3, ink); cfill(px - 1, py - r, 3, 2 * r + 1, ink);
-        }
-        break;
-    }
-    case P_RING: {                                   /* rings spread out */
-        for (int k = 0; k < 2; ++k) {
-            int r = 8 + (a - k * 200) * 30 / SPARK_MS;
-            if (a < k * 200) continue;
-            cfill(cx - r, cy - r, 2 * r + 2, 2, ink); cfill(cx - r, cy + r, 2 * r + 2, 2, ink);
-            cfill(cx - r, cy - r, 2, 2 * r + 2, ink); cfill(cx + r, cy - r, 2, 2 * r + 2, ink);
-        }
-        break;
-    }
-    case P_GLITTER: { /* wand: three tiny stars scatter upward */
-        for (int k = 0; k < 3; ++k) {
-            int sx = x + 12 + ((n + k * 7) % 14) * 2 + a * (k - 1) / 90;
-            int sy = y + 35 - a * (k + 2) / 65;
-            cfill(sx - 3, sy, 7, 2, ink);
-            cfill(sx, sy - 3, 2, 7, ink);
-            cfill(sx, sy, 2, 2, tint);
-        }
-        break;
-    }
-    case P_BEAM: { /* UFO: shifting light beam and orbiting dots */
-        int sweep = (a / 90 + n) % 9 - 4;
-        for (int k = 0; k < 3; ++k) {
-            int bx = cx + sweep * (k + 1) / 2;
-            int by = y + 28 + k * 6;
-            cfill(bx - (k + 1) * 3, by, (k + 1) * 6 + 1, 2, ink);
-        }
-        cfill(cx - 14 + a * 22 / SPARK_MS, cy - 18, 4, 4, tint);
-        cfill(cx + 12 - a * 20 / SPARK_MS, cy - 12, 3, 3, ink);
-        break;
-    }
-    case P_ZAP: { /* impact: jagged bolts spread from the center */
-        int d = 5 + a * 16 / SPARK_MS;
-        for (int k = -1; k <= 1; ++k) {
-            int zx = cx + k * d, zy = cy - d + (k ? 4 : 0);
-            cfill(zx, zy, 4, 3, ink);
-            cfill(zx + (k ? 3 : -3), zy + 5, 3, 6, tint);
-            cfill(zx + (k ? 6 : -6), zy + 12, 5, 3, ink);
-        }
-        break;
-    }
-    default: {                                       /* BANG: thick lines burst out */
-        int r = 10 + a * 16 / SPARK_MS, l = 8;
-        cfill(cx - r - l, cy - 1, l, 3, ink); cfill(cx + r, cy - 1, l, 3, ink);
-        cfill(cx - 1, cy - r - l, 3, l, ink); cfill(cx - 1, cy + r, 3, l, ink);
-        int d = r * 3 / 4;
-        cfill(cx + d, cy - d - 3, 4, 4, ink); cfill(cx - d - 4, cy - d - 3, 4, 4, ink);
-        cfill(cx + d, cy + d, 4, 4, ink); cfill(cx - d - 4, cy + d, 4, 4, ink);
-        cfill(cx + d + 1, cy - d - 2, 2, 2, tint);
-        break;
-    }
-    }
-}
 /* A distinctive second layer on each instrument: notes do more than
  * nudge a sprite. Kept inside each tile with cfill clipping and integer math. */
 static void draw_instrument_action(unsigned kind_i, unsigned note, uint32_t age,
@@ -1281,59 +1295,134 @@ static void draw_instrument_action(unsigned kind_i, unsigned note, uint32_t age,
         break;
     }
 }
-static void draw_tile(unsigned i, unsigned x, unsigned y, unsigned w, unsigned h)
+/* One of the eight small icons in the strip: it bounces when it plays. */
+static void draw_icon(unsigned i, unsigned x, unsigned y, unsigned w, unsigned h)
 {
     struct groove_view v;
     groove_get_view(i, 0, &v);
     uint16_t c = kid_colors[i];
-    unsigned selected = i == track;
-    fill(x, y, w, h, v.muted ? OFF : selected ? c : dim(c));
-    if (selected) frame(x, y, w, h, 3, picking ? kid_colors[2] : INK);
-    unsigned level = v.audible && !v.muted ? v.level : 0, look_i = shown_kind(i);
-    int dx = 0, dy = 0;
-    unsigned lit = 0;
-    tile_move(i, look_i, &dx, &dy, &lit);
-    picture((unsigned)((int)x + 4 + dx), (unsigned)((int)y + 6 + dy), look_i, 0,
-            v.muted ? OFF4 : lit ? (selected ? BG : c) : selected ? INK : SOFT);
-    text_center(x, w, y + h - 16, v.muted ? "QUIET" : kind_name[look_i], 1, v.muted ? SOFT : selected ? BG : INK);
-    if (level) fill(x + 4, y + h - 5, (w - 8) * level / 127U, 2, selected ? BG : INK);   /* how loud */
-    clip_x0 = (int)x + 3; clip_y0 = (int)y + 3; clip_x1 = (int)(x + w) - 3; clip_y1 = (int)(y + h) - 18;
-    for (unsigned k = 0; k < SPARKS; ++k) {
-        uint32_t age = clock_now - sparks[k].at;
-        if (!sparks[k].at || sparks[k].track != i || age >= SPARK_MS) continue;
-        draw_spark(kind_anim[look_i].spark, sparks[k].note, age, (int)x, (int)y, w, h, selected ? INK : c);
-        draw_instrument_action(look_i, sparks[k].note, age, (int)x, (int)y, selected ? INK : c);
+    unsigned sel = i == track, k = shown_kind(i), iw = kind_icon[k].w, ih = kind_icon[k].h;
+    fill(x, y, w, h, v.muted ? OFF : sel ? c : dim(c));
+    uint32_t age = hit_at[i] ? clock_now - hit_at[i] : 100000U;
+    int dy = age < 240U ? -(int)((240U - age) * 4U / 240U) : 0;
+    picture_at(x + (w - iw) / 2U, (unsigned)((int)y + ((int)h - (int)ih) / 2 + dy), k, 1,
+               v.muted ? OFF4 : sel ? BG : INK);
+    unsigned level = v.audible && !v.muted ? v.level : 0;
+    if (level) fill(x + 2, y + h - 3, (w - 4) * level / 127U, 2, sel ? BG : INK);
+    if (sel) frame(x, y, w, h, 2, picking ? kid_colors[2] : INK);
+    if (groove_arp_enabled(i)) fill(x + w - 6, y + 3, 3, 3, groove_arp_setting(i, 5) ? kid_colors[2] : sel ? BG : INK);
+}
+/* The stage: the chosen instrument big, in its own scene, always moving a
+ * little and answering every note; other instruments' notes rise as bubbles
+ * from their icons. */
+static void draw_stage(void)
+{
+    struct groove_view v;
+    groove_get_view(track, 0, &v);
+    unsigned look_i = shown_kind(track), theme = kind_theme[look_i];
+    uint16_t c = kid_colors[track], faint = dim(dim(c));
+    uint32_t t = clock_now, hit = hit_at[track] ? t - hit_at[track] : 100000U;
+    int cx = 120, cy = STAGE_Y + 60;
+    fill(0, STAGE_Y, 240, STAGE_H, BG);
+    sx0 = clip_x0 = 0; sy0 = clip_y0 = STAGE_Y; sx1 = clip_x1 = 240; sy1 = clip_y1 = STAGE_Y + STAGE_H;
+    switch (theme) {                                   /* the scene behind */
+    case T_NOTES:                                      /* a music staff */
+        for (int l = 0; l < 5; ++l) fill(10, STAGE_Y + 36 + (unsigned)l * 12U, 220, 1, faint);
+        break;
+    case T_RINGS:                                      /* rings that breathe */
+        sring(cx, cy, 44 + tri(t, 2400) * 4 / 1000, 2, dim(c), 9);
+        sring(cx, cy, 58 - tri(t, 3100) * 3 / 1000, 1, dim(c), 5);
+        break;
+    case T_STARS:                                      /* drifting, twinkling stars and a moon */
+        for (unsigned k = 0; k < 22; ++k) {
+            uint32_t h = hash32(k * 2654435761U + 7U);
+            int px = (int)((h % 240U + 240U - (t / 90U + k * 7U) % 240U) % 240U);
+            int py = STAGE_Y + 4 + (int)((h >> 8) % (STAGE_H - 8U));
+            sdisc(px, py, 1 + (int)((h >> 4) & 1U), INK, (unsigned)(tri(t + (h >> 16) % 1500U, 1500) + 1000) * 12U / 2000U + 2U);
+        }
+        sglow(204, STAGE_Y + 22, 22, kid_colors[2], 7);
+        sdisc(204, STAGE_Y + 22, 10, kid_colors[2], 14);
+        break;
+    case T_PADS:                                       /* four drum pads */
+        for (int k = 0; k < 4; ++k) sring(36 + k * 56, STAGE_Y + 98, 17, 3, dim(c), 12);
+        cy = STAGE_Y + 38;
+        break;
+    default:                                           /* T_PIXELS: blocky ground scrolling by */
+        for (int k = 0; k < 17; ++k) cfill(k * 16 - (int)(t / 40U % 16U), STAGE_Y + 110, 8, 8, faint);
+        break;
     }
-    /* The drum's character and live FX visibly follow the physical knobs,
-     * rather than animating only on note triggers. */
-    if (i == track && drum_track(i) && sound_panel == 3) {
-        int punch = drum_value(11, "Accent");
-        int pitch = drum_value(drum, "Tune");
-        int drive = drum_value(drum, "Drive");
-        int height = pitch < 0 ? 4 : 4 + pitch * 14 / 127;
-        unsigned pulse = (clock_now / 90U) & 3U;
-        cfill((int)x + 8, (int)y + 12 + (int)pulse, 3 + (punch < 0 ? 0 : punch * 18 / 127), 3, INK);
-        cfill((int)x + 8, (int)y + 36 - height, 4, height, kid_colors[2]);
-        if (drive > 50) {
-            cfill((int)x + 38 + (int)pulse * 2, (int)y + 22, 5, 5, kid_colors[1]);
-            cfill((int)x + 40 - (int)pulse * 2, (int)y + 34, 4, 4, INK);
+    for (unsigned k = 0; k < SPARKS; ++k) {            /* every note */
+        uint32_t age = t - sparks[k].at;
+        if (!sparks[k].at || age >= SPARK_MS) continue;
+        unsigned n = sparks[k].note, fade = 16U - age * 16U / SPARK_MS;
+        uint16_t nc = note_colors[n % 12U];
+        if (sparks[k].track != track) {                /* someone else in the band: a bubble */
+            sdisc(15 + sparks[k].track * 30, STAGE_Y + STAGE_H - 6 - (int)(age * 80U / SPARK_MS), 4,
+                  kid_colors[sparks[k].track & 7U], fade);
+            continue;
+        }
+        switch (theme) {
+        case T_NOTES: {                                /* a note floats up the staff */
+            int nx = 18 + (int)(n % 12U) * 18 + tri(age, 500) * 5 / 1000;
+            int ny = STAGE_Y + STAGE_H - 16 - (int)(age * 96U / SPARK_MS);
+            sdisc(nx, ny, 6, nc, fade);
+            if (fade > 5) { cfill(nx + 4, ny - 18, 2, 18, INK); cfill(nx + 6, ny - 18, 5, 2, INK); }
+            break;
+        }
+        case T_RINGS: sring(cx, cy, 30 + (int)(age * 80U / SPARK_MS), 3, nc, fade); break;
+        case T_STARS: {                                /* a shooting star */
+            int hx = 10 + (int)(age * 230U / SPARK_MS), hy = STAGE_Y + 10 + (int)(n % 12U) * 4 + (int)(age * 40U / SPARK_MS);
+            for (int q = 5; q >= 0; --q) sdisc(hx - q * 7, hy - q, 4 - q / 2, nc, fade * (unsigned)(6 - q) / 6U);
+            sglow(hx, hy, 12, INK, fade / 2U);
+            break;
+        }
+        case T_PADS: {                                 /* a pad lights up */
+            int px = 36 + (int)(n % 4U) * 56, py = STAGE_Y + 98;
+            sdisc(px, py, 15, nc, fade);
+            sring(px, py, 18 + (int)(age * 22U / SPARK_MS), 2, INK, fade);
+            break;
+        }
+        default: {                                     /* a column of blocks jumps */
+            int col = (int)(n % 12U), top = (int)((SPARK_MS - age) * 6U / SPARK_MS);
+            for (int b = 0; b <= top; ++b) cfill(7 + col * 19, STAGE_Y + 98 - b * 10, 14, 8, nc);
+            break;
+        }
         }
     }
-    if (i == track && fx_started && fx_key < 6) {
-        int p = (int)(clock_now / 85U % 5U);
-        cfill((int)x + 9 + p * 6, (int)y + 9, 9, 3, kid_colors[5]);
-        if (fx_key == 2) cfill((int)x + 22, (int)y + 35 - p * 3, 15 + p * 2, 3, INK);
-        else if (fx_key == 3 || fx_key == 5) cfill((int)x + 12, (int)y + 36, (p & 1) ? 34 : 15, 4, INK);
+    /* The instrument itself, big: it floats, jumps when it plays, and glows with its sound. */
+    unsigned iw = kind_icon[look_i].w, ih = kind_icon[look_i].h, sc = iw == 24 ? 3U : 4U;
+    int dy = tri(t, 2000) * 3 / 1000;
+    if (hit < 400U) dy -= (int)(400U - hit) * 10 / 400;
+    if (theme == T_PIXELS) dy = dy / 3 * 3;
+    unsigned level = v.audible && !v.muted ? v.level : 0;
+    sglow(cx, cy, 50, c, 4U + level / 12U);
+    picture_at((unsigned)(cx - (int)(iw * sc) / 2), (unsigned)(cy - (int)(ih * sc) / 2 + dy), look_i, sc,
+               v.muted ? OFF4 : hit < 110U ? INK : c);
+    int ox = cx - 28, oy = cy - 24;                    /* its own action, around it */
+    for (unsigned k = 0; k < SPARKS; ++k) {
+        uint32_t age = t - sparks[k].at;
+        if (sparks[k].at && sparks[k].track == track && age < SPARK_MS)
+            draw_instrument_action(look_i, sparks[k].note, age, ox, oy, INK);
     }
-    for (unsigned k = 0; k < 27; ++k)
-        if (key_note[k] != 0xff && key_track[k] == i) { fill(x + w - 12, y + 6, 7, 7, INK); break; }
-    if (groove_arp_enabled(i)) {                       /* arpeggiator: a little staircase */
-        uint16_t b = groove_arp_setting(i, 5) ? kid_colors[2] : selected ? BG : INK;
-        for (unsigned s = 0; s < 3; ++s) fill(x + w - 16 + s * 4U, y + h - 24 - s * 4U, 3, 3 + s * 4U, b);
+    if (drum_track(track) && sound_panel == 3) {       /* Drum Fun follows its knobs */
+        int punch = drum_value(11, "Accent"), pitch = drum_value(drum, "Tune"), drive = drum_value(drum, "Drive");
+        int height = pitch < 0 ? 4 : 4 + pitch * 14 / 127, pulse = (int)(t / 90U & 3U);
+        cfill(ox + 8, oy + 12 + pulse, 3 + (punch < 0 ? 0 : punch * 18 / 127), 3, INK);
+        cfill(ox + 8, oy + 36 - height, 4, height, kid_colors[2]);
+        if (drive > 50) { cfill(ox + 38 + pulse * 2, oy + 22, 5, 5, kid_colors[1]); cfill(ox + 40 - pulse * 2, oy + 34, 4, 4, INK); }
     }
+    if (fx_started && fx_key < 6) {                    /* a silly FX is held */
+        int p = (int)(t / 85U % 5U);
+        cfill(ox + 9 + p * 6, oy + 9, 9, 3, kid_colors[5]);
+        if (fx_key == 2) cfill(ox + 22, oy + 35 - p * 3, 15 + p * 2, 3, INK);
+        else if (fx_key == 3 || fx_key == 5) cfill(ox + 12, oy + 36, (p & 1) ? 34 : 15, 4, INK);
+    }
+    text(6, STAGE_Y + 5, v.muted ? "QUIET" : kind_name[look_i], 1, v.muted ? SOFT : c);
+    if (readout_on()) draw_readout(24, STAGE_Y + 14, 192, 88);
 }
 static void draw_pick(void)
 {
+    if (readout_on()) { draw_readout(0, 42, 240, 40); return; }
     fill(0, 42, 240, 40, BG);
     uint16_t c = kid_colors[track];
     picture(4, 46, look(track), 1, c);
@@ -1400,7 +1489,8 @@ static void draw_element(unsigned e)
     else if (e == E_BODY) fill(x, y, w, h, BG);
     else if (e == E_HEAD) draw_head();
     else if (e == E_FOOT) draw_foot();
-    else if (mode == KID_PLAY) draw_tile(e - E_ITEMS, x, y, w, h);
+    else if (mode == KID_PLAY && e - E_ITEMS == 8) draw_stage();
+    else if (mode == KID_PLAY) draw_icon(e - E_ITEMS, x, y, w, h);
     else if (e - E_ITEMS == 16) draw_pick();
     else draw_cell(e - E_ITEMS, x, y, w, h);
 }
@@ -1675,6 +1765,8 @@ void groove_screen_control(void)
     uint32_t now = fm1_millis();
     clock_now = now;
     knobs_read(&c, now);
+    for (unsigned k = 0; k < 4 && !parent && !help; ++k)   /* a knob turned: show it big */
+        if (c.encoders[2 + k]) { readout_k = k; readout_at = now | 1U; }
     groove_master_update(c.knob < KID_MASTER_LIMIT ? c.knob : KID_MASTER_LIMIT);
     uint32_t pressed = c.buttons & ~previous_buttons;
     if (pressed & BUTTON(FX)) {
