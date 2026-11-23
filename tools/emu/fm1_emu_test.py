@@ -278,7 +278,7 @@ def kid_run(emu, fwsc, out, name, ms, keys, flash=None):
     # Keep boot-aligned audio for every behavioral test, but only capture
     # 100 ms screenshots where tests actually inspect frame transitions.
     # Audio-only scenarios retain a 1-second cadence (10x fewer PPM frames).
-    visual = (name in ("songs", "sparks", "sparks-song", "learn", "help", "picker", "battery")
+    visual = (name in ("songs", "sparks", "sparks-song", "learn", "help", "picker", "battery", "readout")
               or name.startswith(("instruments-", "bass-", "playful-sounds-", "sparks-", "instrument-actions-")))
     r = run(emu, fwsc, ms, keys, out / name, flash=flash, frames=100 if visual else 1000)
     if r["lcd"]:
