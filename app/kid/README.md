@@ -9,13 +9,13 @@ no separate patch import is required.
 
 | Control | What it does |
 |---|---|
-| **SELECT** knob | Pick a tile. Each tile shows its instrument's picture and name |
-| **ALGORITHM** knob | Change the chosen tile's instrument: piano, organ, trumpet, flute, violin, choir, bells, xylophone, guitar, bass, robot, dream, game (chiptune), fun (samples) drums, magic, space or SFX. It switches when the knob rests |
+| **SELECT** knob | Pick an instrument from the eight icons at the bottom. The chosen one plays big on the stage above them, in its own moving scene |
+| **ALGORITHM** knob | Change the chosen instrument: piano, organ, trumpet, flute, violin, choir, bells, xylophone, guitar, bass, robot, dream, game (chiptune), fun (samples) drums, magic, space or SFX. It switches when the knob rests |
 | **Piano keys** | Play the instrument. On melodic instruments every key fits the scale (HAPPY, a C major pentatonic, to start; see EDIT) |
 | *(fun)* | All 18 instruments now have their own lively animation: their artwork moves differently and draws instrument-specific effects when played, including during song playback. The loudness bar also moves with the sound |
 | **SEQ** | BEAT mode: white keys switch the 16 steps on and off; black keys pick the drum (or note) to place. Other drums show as dots; melody steps show their note by colour and height |
 | **ALGORITHM** in BEAT | Choose the song part, A to D. Turning to a new part copies the part before it, ready to change. The song plays A, B, C, D in turn and BEAT follows along while it plays. A part with no steps left drops out of the song. In BEAT, PRESETS (or the black keys) picks the drum |
-| **HOME** | Tap: back to the instrument tiles. **Hold: help** — a screen showing what each button does on the page you are on (playing, BEAT, SOUND, KEYS, SONGS or PLAY ALONG); let go to go back |
+| **HOME** | Tap: back to the stage and instruments. **Hold: help** — a screen showing what each button does on the page you are on (playing, BEAT, SOUND, KEYS, SONGS or PLAY ALONG); let go to go back |
 | **PLAY** | Start / stop |
 | **REC** | Record what you play into the loop |
 | **KNOB 1–4** | LOUD, BRIGHT (each engine's brightness), SOUND (another version of the same instrument, with its name), SPEED. Turn fast for bigger steps |
@@ -158,3 +158,22 @@ Hold **FX** to bring up **SILLY FX**. The first six white keys (F3, G3, A3, B3, 
 When REC is active during playback, changes to **LOUD** on 808 tracks and **BRIGHT** on melodic tracks are written as parameter locks at the current sequencer step. This adds recorded variation to patterns within the existing lock system. Per-drum tune/decay automation and recording of the temporary FX are not yet supported by that lock system.
 
 On Drum Fun, the selected drum's tuning, decay and drive bars visually track knob movement; the kit preset name identifies the selected sound family.
+
+## The stage (1.9)
+
+In PLAY mode the screen is a stage over a strip of the eight instruments as
+small icons. The stage shows the chosen instrument big, in one of five scenes:
+
+| Scene | Instruments | A note makes |
+|---|---|---|
+| Notes on a staff | piano, organ, trumpet, flute, violin, guitar, fun | a note float up the staff |
+| Rings | choir, bells, xylophone, bass | a ring spread out |
+| Stars and a moon | dream, magic, space | a shooting star |
+| Drum pads | drums, SFX | a pad light up |
+| Pixels | robot, game | a column of blocks jump |
+
+The instrument floats, jumps when it plays and glows with its sound, with its
+own little action around it. Notes from the other instruments rise as bubbles
+from their icons. Turning any of K1-K4 shows the knob big for about a second
+(name, value and bar) on the stage, or in BEAT's top row. The soft shapes follow
+[h1](https://github.com/jakehandy/h1)'s renderer (MIT, Jake Handy).

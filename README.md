@@ -20,11 +20,15 @@ sound engines.
 
 ## What it does
 
-- **Eight tiles, 18 instrument choices with pictures:** piano, organ, trumpet, flute,
+- **A stage and eight instruments:** the chosen instrument plays big on the
+  stage, in its own scene (notes on a staff, rings, stars, drum pads or pixels),
+  always moving a little and answering every note; the eight instruments sit
+  underneath as small icons that bounce when they play.
+- **18 instrument choices with pictures:** piano, organ, trumpet, flute,
   violin, choir, bells, xylophone, guitar, bass, robot, dream, game (chiptune),
   fun (samples), drums, magic, space, and SFX. Turn SELECT to choose one and play the keys. On
   melodic instruments every key fits (HAPPY, a C major pentatonic scale, to start), so nothing
-  sounds wrong. Turn ALGORITHM to swap a tile's instrument.
+  sounds wrong. Turn ALGORITHM to swap the chosen instrument.
 - **Additional ready-to-play sounds:** MAGIC, SPACE and SFX expose 23 of the already embedded unusual DX7 factory voices through the kid interface; no post-install imports. Existing drums get stronger downbeats and gentler offbeats on newly programmed steps.
 - **BEAT mode (SEQ):** the 16 white keys are 16 steps and the black keys pick
   the drum or note. Key lights show the pattern and the playhead. Every drum
@@ -32,7 +36,8 @@ sound engines.
 - **Arpeggiator (ARP):** tap for up, down, bounce or random; hold for "keep
   going"; hold and turn the knobs for speed, octaves, note length and swing.
 - **Four knobs:** LOUD, BRIGHT, SOUND (other versions of the same instrument,
-  with the sound's name) and SPEED. Turning fast takes bigger steps.
+  with the sound's name) and SPEED. Turning fast takes bigger steps. Whatever
+  page you are on, a knob shows its name, value and bar big while you turn it.
 - **EDIT sound panel:** REVERB, ECHO, LONG (how long notes ring) and ROOM.
 - **Scales and one-key chords:** EDIT twice picks a scale (HAPPY, SAD, DO RE MI,
   SPOOKY, DREAMY, ALL KEYS), turns on CHORDS, so one key plays a chord, and
@@ -41,8 +46,8 @@ sound engines.
   he is on.
 - **Play along:** 8 tunes (Twinkle, Happy Birthday, Ode to Joy, ...) where the
   next key to press lights up.
-- **Animations:** notes float up the tile as they are played; pictures dance to
-  their sound.
+- **Animations:** the stage answers every note, by key or by the song; other
+  instruments' notes rise as bubbles from their icons.
 - **Song parts:** in BEAT, ALGORITHM adds parts B, C and D (each starts as a copy
   of the one before); the song plays them in turn.
 - **16 demo songs:** ENV opens a list of M-VAVE's demo songs; each loads its
@@ -123,6 +128,8 @@ M-VAVE's [FM1 Open README](docs/FM1-OPEN.md).
   tool, and the reference for building on Linux and for the battery levels
 - [FM-1-RE](https://github.com/AL-255/FM-1-RE) and the FM-1 community's
   reverse-engineering work
+- [h1](https://github.com/jakehandy/h1) by Jake Handy (MIT): the stage's soft
+  discs, rings and glows follow its renderer
 
 ## License
 
